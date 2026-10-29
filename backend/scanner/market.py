@@ -98,7 +98,7 @@ def regime(index: dict, br: dict) -> dict:
     }
 
 
-def overview(prices: pd.DataFrame, scan: pd.DataFrame) -> dict:
+def overview(prices: pd.DataFrame, scan: pd.DataFrame, sectors: dict[str, list[dict]] | None = None) -> dict:
     out = {}
     for market, idx in INDEX_SYMBOLS.items():
         symbols = scan.loc[scan["market"] == market, "yf_symbol"].tolist()
@@ -121,6 +121,7 @@ def overview(prices: pd.DataFrame, scan: pd.DataFrame) -> dict:
             "breadth": br_now,
             "breadth_history": br_hist,
             "outlook": g["outlook"].value_counts().to_dict(),
+            "sectors": (sectors or {}).get(market, []),
             "chart": views.chart(main_px, (20, 50, 200), views.DAILY_BARS),
         }
     return out

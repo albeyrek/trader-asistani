@@ -6,7 +6,7 @@ import re
 
 import pandas as pd
 
-from . import events, levels
+from . import events, fundamentals, levels, strength
 from .indicators import ema
 
 JSON_COLUMNS = ("daily_reasons", "weekly_reasons", "risk_flags", "top_news", "alerts")
@@ -14,7 +14,15 @@ LIST_FIELDS = [
     "symbol", "market", "name", "sector", "close", "change_pct", "combined_score", "daily_score",
     "weekly_score", "outlook", "overall_risk", "volatility", "news_score", "news_risk", "at_new_high",
     "at_new_low", "alerts", "earnings_date", "earnings_status",
+    "rs_rating", "rs_3m", "pe", "pb", "market_cap", "free_float", "rsi", "atr_pct",
 ]
+# Nasdaq sektör adları -> Türkçe
+US_SECTORS_TR = {
+    "Technology": "Teknoloji", "Finance": "Finans", "Health Care": "Sağlık", "Energy": "Enerji",
+    "Utilities": "Kamu hizmetleri", "Industrials": "Sanayi", "Consumer Discretionary": "Tüketici (dayanıklı/isteğe bağlı)",
+    "Consumer Staples": "Temel tüketim", "Real Estate": "Gayrimenkul", "Basic Materials": "Temel malzemeler",
+    "Telecommunications": "Telekomünikasyon", "Miscellaneous": "Diğer",
+}
 # Backtest sonuçlarına göre teknik skorun güvenilirliği (bkz. data/backtest_report.txt)
 MODEL_RELIABILITY = {
     "BIST": {"level": "Orta", "note": "Geçmiş testte skorlar sonraki 20 günün getirisiyle tutarlı ve anlamlı ilişki gösterdi."},
@@ -64,13 +72,41 @@ def meta(scan: pd.DataFrame, updated_at: pd.Timestamp) -> dict:
     }
 
 
-def enrich(scan: pd.DataFrame, events_map: dict[str, dict]) -> pd.DataFrame:
-    """Tarama tablosuna yan verileri ekler (bilanço takvimi; ileride göreli güç, temel veriler)."""
-    out = scan.copy()
-    keys = out["market"] + ":" + out["symbol"]
-    out["earnings_date"] = [events_map.get(k, {}).get("date") for k in keys]
-    out["earnings_status"] = [events_map.get(k, {}).get("status") for k in keys]
-    return out
+class SideData:
+    """Tarama dışı veriler: bilanço takvimi, temel veriler, göreli güç ve sektörler.
+    Hem bulut dışa aktarımı hem yerel API aynı hesabı kullanır."""
+
+    def __init__(self, prices: pd.DataFrame, scan: pd.DataFrame):
+        self.events = events.load()
+        self.fund = fundamentals.load()
+        self.sector_of: dict[str, str | None] = {}
+        for r in scan.itertuples():
+            key = f"{r.market}:{r.symbol}"
+            if r.market == "BIST":
+                self.sector_of[key] = r.sector or None
+            else:
+                sec = (self.fund.get(key) or {}).get("sector")
+                self.sector_of[key] = US_SECTORS_TR.get(sec, sec) if sec else None
+        self.rs, self.sectors = strength.compute(prices, scan, self.sector_of)
+
+    def enrich(self, scan: pd.DataFrame) -> pd.DataFrame:
+        out = scan.copy()
+        keys = (out["market"] + ":" + out["symbol"]).tolist()
+        out["sector"] = [self.sector_of.get(k) or "" for k in keys]
+        out["earnings_date"] = [self.events.get(k, {}).get("date") for k in keys]
+        out["earnings_status"] = [self.events.get(k, {}).get("status") for k in keys]
+        for col in ("rs_rating", "rs_1m", "rs_3m"):
+            out[col] = [self.rs.get(k, {}).get(col) for k in keys]
+        for col in ("pe", "pb", "market_cap", "free_float"):
+            out[col] = [(self.fund.get(k) or {}).get(col) for k in keys]
+        return out
+
+    def sector_info(self, market: str, sector: str | None) -> dict | None:
+        rows = self.sectors.get(market, [])
+        for r in rows:
+            if r["sector"] == sector:
+                return {**r, "of": len(rows)}
+        return None
 
 
 def levels_map(scan: pd.DataFrame) -> dict:
@@ -99,10 +135,32 @@ def news_list(news: pd.DataFrame) -> list[dict]:
     } for x in n.itertuples()]
 
 
+def _rs_note(r: pd.Series, sector: dict | None) -> str | None:
+    rs = r.get("rs_rating")
+    if rs is None or pd.isna(rs):
+        return None
+    rs = int(rs)
+    level = "çok güçlü" if rs >= 85 else "güçlü" if rs >= 70 else "zayıf" if rs <= 30 else "ortalama"
+    text = f"Göreli güç {rs}/99 ({level}): son aylardaki performansı piyasadaki hisselerin yaklaşık %{rs} kadarından iyi."
+    rs3 = r.get("rs_3m")
+    if rs3 is not None and pd.notna(rs3):
+        diff = f"%{abs(rs3):.1f}".replace(".", ",")
+        text += f" Son 3 ayda endeksten {diff} {'daha iyi' if rs3 > 0 else 'daha kötü'} getiri."
+    if sector:
+        text += f" Sektörü ({sector['sector']}) {sector['of']} sektör içinde {sector['rank']}. sırada."
+    return text
+
+
 def stock_detail(r: pd.Series, daily: pd.DataFrame, weekly: pd.DataFrame, news: pd.DataFrame | None,
-                 event: dict | None = None) -> dict:
+                 side: SideData | None = None) -> dict:
     detail = row(r)
+    key = f"{r['market']}:{r['symbol']}"
+    event = side.events.get(key) if side else None
+    fund = (side.fund.get(key) if side else None) or None
     detail["event"] = event
+    detail["fundamentals"] = fund
+    detail["fundamental_flags"] = fundamentals.flags(fund, r["market"])
+    detail["sector_info"] = side.sector_info(r["market"], r.get("sector") or None) if side else None
     detail["chart_daily"] = chart(daily, (20, 50, 200), DAILY_BARS)
     detail["chart_weekly"] = chart(weekly, (10, 30, 50), WEEKLY_BARS)
     # Grafik asistanı: çoklu destek/direnç, trend çizgileri, dönem getirileri, yorumlar
@@ -117,6 +175,10 @@ def stock_detail(r: pd.Series, daily: pd.DataFrame, weekly: pd.DataFrame, news: 
     note = events.event_note(event)
     if note:
         detail["insights"].insert(0, note)
+    rs_note = _rs_note(r, detail["sector_info"])
+    if rs_note:
+        detail["insights"].append(rs_note)
+    detail["insights"] += detail["fundamental_flags"]
     detail["news"] = news_list(news) if news is not None and len(news) else []
     detail["reliability"] = MODEL_RELIABILITY.get(r["market"])
     return detail

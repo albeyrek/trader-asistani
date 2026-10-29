@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Line, Path, Text as SvgText } from 'react-native-svg';
@@ -8,7 +9,7 @@ import { Card, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
 import { regimeColors, scoreColors, useTheme } from '@/lib/theme';
-import type { Market, MarketData, MarketOverview, Outlook } from '@/lib/types';
+import type { Market, MarketData, MarketOverview, Outlook, SectorRow } from '@/lib/types';
 
 const OUTLOOKS: Outlook[] = ['Güçlü Yükseliş', 'Yükseliş', 'Nötr', 'Düşüş', 'Güçlü Düşüş'];
 
@@ -104,6 +105,8 @@ function MarketBody({ m, market }: { m: MarketData; market: Market }) {
         </Text>
       </Card>
 
+      {m.sectors?.length ? <SectorsCard rows={m.sectors} market={market} /> : null}
+
       <Card title="Hisselerin teknik görünümü">
         <View style={styles.stack}>
           {OUTLOOKS.map((o) => {
@@ -122,6 +125,50 @@ function MarketBody({ m, market }: { m: MarketData; market: Market }) {
         </View>
       </Card>
     </>
+  );
+}
+
+const SECTORS_COLLAPSED = 8;
+
+function SectorsCard({ rows, market }: { rows: SectorRow[]; market: Market }) {
+  const t = useTheme();
+  const [all, setAll] = useState(false);
+  const shown = all ? rows : rows.slice(0, SECTORS_COLLAPSED);
+  return (
+    <Card title="Sektörler (göreli güce göre)">
+      <Text style={[styles.note, { color: t.muted, marginTop: 0 }]}>
+        Para hangi sektörlere giriyor: medyan göreli güç (RS), 1 ve 3 aylık medyan getiri, 200 günlük ortalama üstü oranı.
+        Liderlere dokunarak hisseye git.
+      </Text>
+      {shown.map((r) => {
+        const c = (r.rs ?? 50) >= 70 ? t.up : (r.rs ?? 50) <= 35 ? t.down : t.warn;
+        return (
+          <View key={r.sector} style={[styles.secRow, { borderTopColor: t.border }]}>
+            <Text style={[styles.secRank, { color: t.muted }]}>{r.rank}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={[styles.secName, { color: t.text }]} numberOfLines={1}>{r.sector} <Text style={{ color: t.muted, fontWeight: '400' }}>({r.count})</Text></Text>
+              <Text style={[styles.tiny, { color: t.muted }]}>
+                1A {f.pct(r.ret_1m, 1)} · 3A {f.pct(r.ret_3m, 1)} · 200g üstü %{f.num(r.above200, 0)}
+              </Text>
+              <View style={styles.leaders}>
+                {r.leaders.map((sym) => (
+                  <Text key={sym} style={[styles.leader, { color: t.accent }]}
+                    onPress={() => router.push({ pathname: '/stock/[symbol]', params: { symbol: sym, market } })}>
+                    {sym}
+                  </Text>
+                ))}
+              </View>
+            </View>
+            <Text style={[styles.secRs, { color: c }]}>{r.rs ?? '—'}</Text>
+          </View>
+        );
+      })}
+      {rows.length > SECTORS_COLLAPSED ? (
+        <Text style={[styles.more, { color: t.accent }]} onPress={() => setAll(!all)}>
+          {all ? 'Daha az göster' : `Tüm sektörler (${rows.length})`}
+        </Text>
+      ) : null}
+    </Card>
   );
 }
 
@@ -208,4 +255,11 @@ const styles = StyleSheet.create({
   stack: { flexDirection: 'row', borderRadius: 7, overflow: 'hidden' },
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: 6, position: 'absolute', left: 0, bottom: -18 },
   swatch: { width: 12, height: 3, borderRadius: 2 },
+  secRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9, borderTopWidth: StyleSheet.hairlineWidth },
+  secRank: { width: 20, fontSize: 12, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  secName: { fontSize: 14, fontWeight: '700' },
+  secRs: { fontSize: 18, fontWeight: '800', minWidth: 30, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  leaders: { flexDirection: 'row', gap: 10, marginTop: 2 },
+  leader: { fontSize: 12, fontWeight: '700' },
+  more: { fontSize: 13, fontWeight: '600', paddingTop: 10 },
 });

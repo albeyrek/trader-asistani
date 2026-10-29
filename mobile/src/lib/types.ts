@@ -22,6 +22,42 @@ export interface StockSummary {
   alerts: string[];
   earnings_date?: string | null;
   earnings_status?: EarningsStatus | null;
+  rs_rating?: number | null; // 1-99
+  rs_3m?: number | null; // endekse göre 3 aylık fazla getiri (%)
+  pe?: number | null;
+  pb?: number | null;
+  market_cap?: number | null; // BIST: mn TL, ABD: mn $
+  free_float?: number | null;
+  rsi?: number | null;
+  atr_pct?: number | null;
+}
+
+export interface Fundamentals {
+  pe?: number | null;
+  ev_ebitda?: number | null;
+  ev_sales?: number | null;
+  pb?: number | null;
+  market_cap?: number | null;
+  market_cap_usd?: number | null;
+  cap_unit?: string;
+  free_float?: number | null;
+  period?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  country?: string | null;
+}
+
+export interface SectorRow {
+  sector: string;
+  count: number;
+  ret_1m: number;
+  ret_3m: number;
+  rs: number | null;
+  above200: number;
+  score: number;
+  leaders: string[];
+  rank: number;
+  of?: number;
 }
 
 export type EarningsStatus = 'expected' | 'estimated' | 'reported';
@@ -119,6 +155,9 @@ export interface StockDetail extends StockSummary {
   chart_daily: Bar[];
   chart_weekly: Bar[];
   event?: EarningsEvent | null;
+  fundamentals?: Fundamentals | null;
+  fundamental_flags?: string[];
+  sector_info?: SectorRow | null;
   // Grafik asistanı (eski veride olmayabilir)
   levels_daily?: LevelSet;
   levels_weekly?: LevelSet;
@@ -164,6 +203,7 @@ export interface MarketData {
   };
   breadth_history: { d: string; a50: number; a200: number }[];
   outlook: Partial<Record<Outlook, number>>;
+  sectors?: SectorRow[];
   chart: Bar[];
 }
 

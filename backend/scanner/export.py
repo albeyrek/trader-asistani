@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import events, market, views
+from . import market, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -48,8 +48,10 @@ def export(out: Path) -> None:
     data = out / "data"
     if data.exists():
         shutil.rmtree(data)
-    events_map = events.load()
-    scan = views.enrich(pd.read_parquet(RESULTS_FILE), events_map)
+    all_prices = load_prices()  # endeksler dahil
+    raw_scan = pd.read_parquet(RESULTS_FILE)
+    side = views.SideData(all_prices, raw_scan)  # bilanço, temel veriler, göreli güç, sektörler
+    scan = side.enrich(raw_scan)
     news = pd.read_parquet(ITEMS_FILE) if ITEMS_FILE.exists() else None
     updated = pd.Timestamp(RESULTS_FILE.stat().st_mtime, unit="s", tz="UTC")
 
@@ -61,7 +63,6 @@ def export(out: Path) -> None:
         _write(data / market / "alerts.json", _list(alerts))
         _write(data / market / "index.json", _list(g.sort_values("symbol")))
 
-    all_prices = load_prices()  # endeksler dahil
     prices = all_prices[all_prices["yf_symbol"].isin(scan["yf_symbol"])]
     daily = dict(tuple(prices.groupby("yf_symbol")))
     weekly = dict(tuple(to_weekly(prices).groupby("yf_symbol")))
@@ -71,8 +72,7 @@ def export(out: Path) -> None:
         if sym not in daily:
             continue
         detail = views.stock_detail(r, daily[sym], weekly.get(sym, daily[sym].iloc[:0]),
-                                    news_by.get((r["market"], r["symbol"])),
-                                    events_map.get(f"{r['market']}:{r['symbol']}"))
+                                    news_by.get((r["market"], r["symbol"])), side)
         _write(data / "stock" / r["market"] / f"{r['symbol']}.json", detail)
         if i % 1000 == 0:
             print(f"  {i}/{len(scan)} hisse detayı")
@@ -90,7 +90,7 @@ def export(out: Path) -> None:
         },
     })
     # Piyasa rejimi: endeksler, genişlik, rejim etiketi (tüm fiyatlar gerekir: endeksler taranan hisselerde değil)
-    _write(data / "market.json", market.overview(all_prices, scan))
+    _write(data / "market.json", market.overview(all_prices, scan, side.sectors))
     # Gün içi fiyat alarmları için seviyeler: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]
     _write(data / "levels.json", views.levels_map(scan))
     # GitHub Pages'in Jekyll işlemesini kapat (alt çizgili dosyalar vb. sorun çıkarmasın)

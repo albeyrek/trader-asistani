@@ -29,6 +29,11 @@ function StockRowBase({ item, quote, onRemove }: { item: StockSummary; quote?: Q
           {item.alerts.length > 0 ? <Ionicons name="warning" size={14} color={t.warn} /> : null}
           {item.at_new_high ? <Ionicons name="trending-up" size={14} color={t.up} /> : null}
           {item.at_new_low ? <Ionicons name="trending-down" size={14} color={t.down} /> : null}
+          {item.rs_rating != null ? (
+            <Text style={[styles.rs, { color: item.rs_rating >= 80 ? t.up : item.rs_rating <= 30 ? t.down : t.muted }]}>
+              RS {item.rs_rating}
+            </Text>
+          ) : null}
         </View>
         <Text style={[styles.name, { color: t.muted }]} numberOfLines={1}>{item.name}</Text>
         <View style={styles.chips}>
@@ -73,5 +78,6 @@ const styles = StyleSheet.create({
   price: { fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
   change: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
   quoteTime: { fontSize: 10 },
+  rs: { fontSize: 11, fontWeight: '700', marginLeft: 2 },
   remove: { marginLeft: 2 },
 });

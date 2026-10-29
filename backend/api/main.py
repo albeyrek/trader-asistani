@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from scanner import events, market, views
+from scanner import market, views
 from scanner.config import DATA_DIR
 from scanner.devices import upsert_device
 from scanner.prices import PRICE_FILE, to_weekly
@@ -36,9 +36,19 @@ def _load(path: Path) -> pd.DataFrame:
         return hit[1]
     df = pd.read_parquet(path)
     if path == SCAN_FILE:
-        df = views.enrich(df, events.load())
+        global _side
+        _side = views.SideData(_load(PRICE_FILE), df)
+        df = _side.enrich(df)
     _cache[str(path)] = (mtime, df)
     return df
+
+
+_side: views.SideData | None = None
+
+
+def _side_data() -> views.SideData | None:
+    _load(SCAN_FILE)  # gerekirse yeniden hesaplar
+    return _side
 
 
 @app.get("/api/meta")
@@ -73,7 +83,8 @@ def scan_list(
 @app.get("/api/market")
 def market_overview():
     """Piyasa rejimi (bulutta market.json)."""
-    return market.overview(_load(PRICE_FILE), _load(SCAN_FILE))
+    side = _side_data()
+    return market.overview(_load(PRICE_FILE), _load(SCAN_FILE), side.sectors if side else None)
 
 
 @app.get("/api/levels")
@@ -127,4 +138,4 @@ def stock(symbol: str, market: str | None = None):
     if NEWS_FILE.exists():
         n = _load(NEWS_FILE)
         news = n[(n["symbol"] == r["symbol"]) & (n["market"] == r["market"])]
-    return views.stock_detail(r, sp, to_weekly(sp), news, events.load().get(f"{r['market']}:{r['symbol']}"))
+    return views.stock_detail(r, sp, to_weekly(sp), news, _side_data())

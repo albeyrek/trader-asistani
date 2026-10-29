@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { FundamentalsCard } from '@/components/FundamentalsCard';
 import { PositionCalculator } from '@/components/PositionCalculator';
 import { PriceChart, type ChartLevel, type ChartType } from '@/components/PriceChart';
 import { Card, Chip, LevelChip, ScoreBadge, Segmented, StateView } from '@/components/ui';
@@ -212,6 +213,9 @@ export default function StockScreen() {
           ))}
         </Card>
       ) : null}
+
+      {/* Göreli güç, sektör, temel veriler */}
+      <FundamentalsCard s={s} />
 
       {/* Pozisyon / risk hesaplayıcı */}
       <PositionCalculator

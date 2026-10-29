@@ -8,7 +8,7 @@ import argparse
 import sys
 import time
 
-from . import events, export, news, scan, update_data
+from . import events, export, fundamentals, news, scan, update_data
 
 
 def _run(step: str, fn, *args: str) -> None:
@@ -30,12 +30,13 @@ def main() -> None:
     args = p.parse_args()
     market = ["--market", args.market] if args.market else []
 
-    _run("1/5 Veri güncelleme", update_data.main, *market)
-    _run("2/5 Teknik tarama", scan.main, *market)
-    _run("3/5 Haber ve KAP analizi", news.main)
-    _run("4/5 Bilanço takvimi", events.main)
+    _run("1/6 Veri güncelleme", update_data.main, *market)
+    _run("2/6 Teknik tarama", scan.main, *market)
+    _run("3/6 Haber ve KAP analizi", news.main)
+    _run("4/6 Bilanço takvimi", events.main)
+    _run("5/6 Temel veriler", fundamentals.main)
     if args.export:
-        _run("5/5 Dışa aktarma", export.main, "--out", args.export)
+        _run("6/6 Dışa aktarma", export.main, "--out", args.export)
 
 
 if __name__ == "__main__":
