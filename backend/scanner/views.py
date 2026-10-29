@@ -22,7 +22,8 @@ MODEL_RELIABILITY = {
 }
 DISCLAIMER = ("Bu uygulama yatırım tavsiyesi vermez. Skorlar geçmiş fiyat hareketleri ve haber başlıklarından "
               "otomatik üretilir; gelecekteki fiyatları garanti etmez.")
-DAILY_BARS, WEEKLY_BARS = 260, 104
+DAILY_BARS, WEEKLY_BARS = 520, 104  # ≈2 yıl günlük (grafikte yakınlaştırma/uzaklaştırma için), 2 yıl haftalık
+LEVELS_DAILY_LOOKBACK = 260          # destek/direnç ve trend çizgileri son 1 yıldan
 NEWS_PER_STOCK = 40
 
 
@@ -88,7 +89,7 @@ def stock_detail(r: pd.Series, daily: pd.DataFrame, weekly: pd.DataFrame, news: 
     detail["chart_daily"] = chart(daily, (20, 50, 200), DAILY_BARS)
     detail["chart_weekly"] = chart(weekly, (10, 30, 50), WEEKLY_BARS)
     # Grafik asistanı: çoklu destek/direnç, trend çizgileri, dönem getirileri, yorumlar
-    lv_daily = levels.analyze_levels(daily, DAILY_BARS)
+    lv_daily = levels.analyze_levels(daily, LEVELS_DAILY_LOOKBACK)
     lv_weekly = levels.analyze_levels(weekly, WEEKLY_BARS)
     perf = levels.performance(daily)
     detail["levels_daily"] = lv_daily

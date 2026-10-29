@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
-import { StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View, type GestureResponderEvent, type LayoutChangeEvent } from 'react-native';
 import Svg, { G, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 import * as f from '@/lib/format';
@@ -43,8 +44,23 @@ function indexOf(all: Bar[], d: string): number {
   return i < 0 ? all.length - 1 : i;
 }
 
+const MIN_SPAN = 12; // en fazla yakınlaştırmada görünen mum sayısı
+const ZOOM_STEP = 1.5;
+
+type Gesture =
+  | { mode: 'scrub' }
+  | { mode: 'pinch'; dist0: number; mid0: number; span0: number; end0: number };
+
+function touchInfo(e: GestureResponderEvent): { n: number; dist: number; mid: number } {
+  const ts = e.nativeEvent.touches;
+  if (ts.length < 2) return { n: ts.length, dist: 0, mid: e.nativeEvent.locationX };
+  const [a, b] = ts;
+  return { n: ts.length, dist: Math.abs(a.pageX - b.pageX), mid: (a.locationX + b.locationX) / 2 };
+}
+
 /**
- * all: tüm geçmiş (trend çizgilerinin başlangıcını bulmak için), visible: son kaç çubuğun gösterileceği.
+ * all: tüm geçmiş (trend çizgilerinin başlangıcını bulmak için), visible: başlangıçta görünen son mum sayısı.
+ * Yakınlaştırma: iki parmakla sıkıştırma / sürükleme ya da alttaki düğmeler. Tek parmak: mum değerlerini okuma.
  */
 export function PriceChart({ all, visible, levels, trendlines, market, emaLabels, type }: {
   all: Bar[];
@@ -58,9 +74,25 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
   const t = useTheme();
   const [width, setWidth] = useState(0);
   const [hover, setHover] = useState<number | null>(null);
+  const initialSpan = Math.min(visible, all.length);
+  const [span, setSpan] = useState(initialSpan); // görünen mum sayısı
+  const [endOff, setEndOff] = useState(0); // sağda gizlenen (daha yeni) mum sayısı
+  const gesture = useRef<Gesture>({ mode: 'scrub' });
 
-  const offset = Math.max(0, all.length - visible);
-  const bars = useMemo(() => all.slice(offset), [all, offset]);
+  const clampView = (s: number, e: number): [number, number] => {
+    const sp = Math.round(Math.min(Math.max(s, Math.min(MIN_SPAN, all.length)), all.length));
+    const en = Math.round(Math.min(Math.max(e, 0), all.length - sp));
+    return [sp, en];
+  };
+  const setView = (s: number, e: number) => {
+    const [sp, en] = clampView(s, e);
+    setSpan(sp);
+    setEndOff(en);
+  };
+
+  const offset = Math.max(0, all.length - endOff - span);
+  const last = all.length - 1 - endOff; // görünen son mumun indeksi (tüm geçmişte)
+  const bars = useMemo(() => all.slice(offset, last + 1), [all, offset, last]);
   const plotW = Math.max(width - PAD_RIGHT, 1);
   const priceH = HEIGHT - VOLUME_H - PAD_TOP;
 
@@ -72,9 +104,11 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
         const i2 = all.length - 1;
         const slope = i2 > i1 ? (tl.end.price - tl.start.price) / (i2 - i1) : 0;
         const from = Math.max(i1, offset);
-        return { tl, from: from - offset, to: i2 - offset, v1: tl.start.price + slope * (from - i1), v2: tl.end.price };
+        const to = Math.min(i2, last);
+        const at = (i: number) => tl.start.price + slope * (i - i1);
+        return { tl, from: from - offset, to: to - offset, v1: at(from), v2: at(to) };
       }),
-    [trendlines, all, offset],
+    [trendlines, all, offset, last],
   );
 
   const scale = useMemo(() => {
@@ -105,12 +139,35 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
   const slot = plotW / bars.length;
   const bodyW = Math.max(slot * 0.65, 1);
 
-  const onTouch = (e: GestureResponderEvent) => {
-    const i = Math.round((e.nativeEvent.locationX / plotW) * (bars.length - 1));
+  const scrub = (locationX: number) => {
+    const i = Math.round((locationX / plotW) * (bars.length - 1));
     setHover(Math.min(Math.max(i, 0), bars.length - 1));
   };
 
-  const shown = bars[hover ?? bars.length - 1];
+  const onTouch = (e: GestureResponderEvent) => {
+    const ti = touchInfo(e);
+    if (ti.n >= 2) {
+      const g = gesture.current;
+      if (g.mode !== 'pinch') {
+        gesture.current = { mode: 'pinch', dist0: Math.max(ti.dist, 1), mid0: ti.mid, span0: span, end0: endOff };
+        setHover(null);
+        return;
+      }
+      // Parmaklar açıldıkça daha az mum (yakınlaştırma); orta nokta kaydıkça pencere kayar
+      const newSpan = (g.span0 * g.dist0) / Math.max(ti.dist, 1);
+      const shift = ((ti.mid - g.mid0) / plotW) * g.span0;
+      setView(newSpan, g.end0 + shift);
+      return;
+    }
+    if (gesture.current.mode === 'scrub') scrub(e.nativeEvent.locationX);
+  };
+
+  const endGesture = () => {
+    gesture.current = { mode: 'scrub' };
+    setHover(null);
+  };
+
+  const shown = bars[Math.min(hover ?? bars.length - 1, bars.length - 1)];
   const lastClose = bars[bars.length - 1].close;
   const periodChange = (lastClose / bars[0].close - 1) * 100;
   const lineColor = periodChange >= 0 ? t.up : t.down;
@@ -144,8 +201,10 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
         onMoveShouldSetResponder={() => true}
         onResponderGrant={onTouch}
         onResponderMove={onTouch}
-        onResponderRelease={() => setHover(null)}
-        onResponderTerminate={() => setHover(null)}
+        onResponderRelease={endGesture}
+        onResponderTerminate={endGesture}
+        // Grafik üzerindeyken sayfa kaydırması hareketi çalmasın
+        onResponderTerminationRequest={() => false}
         style={{ height: HEIGHT }}>
         {width > 0 ? (
           <Svg width={width} height={HEIGHT}>
@@ -204,6 +263,19 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
           </Svg>
         ) : null}
       </View>
+      <View style={styles.zoomRow}>
+        <ZoomButton icon="remove" label="Uzaklaştır" onPress={() => setView(span * ZOOM_STEP, endOff)} disabled={span >= all.length} />
+        <ZoomButton icon="add" label="Yakınlaştır" onPress={() => setView(span / ZOOM_STEP, endOff)} disabled={span <= MIN_SPAN} />
+        <ZoomButton icon="chevron-back" label="Geriye kaydır" onPress={() => setView(span, endOff + span / 4)}
+          disabled={offset <= 0} />
+        <ZoomButton icon="chevron-forward" label="İleriye kaydır" onPress={() => setView(span, endOff - span / 4)}
+          disabled={endOff <= 0} />
+        <ZoomButton icon="refresh" label="Sıfırla" onPress={() => setView(initialSpan, 0)}
+          disabled={span === initialSpan && endOff === 0} />
+        <Text style={[styles.zoomInfo, { color: t.muted }]}>
+          {bars.length} mum · {bars[0].d.slice(0, 7)} → {bars[bars.length - 1].d.slice(0, 7)}
+        </Text>
+      </View>
       <View style={styles.legend}>
         <LegendItem color={lineColor} label={type === 'line' ? 'Kapanış' : 'Mum'} />
         <LegendItem color={t.emaFast} label={emaLabels[0]} />
@@ -215,6 +287,25 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
         {lines.length ? <LegendItem color={t.text} label="Trend çizgisi" /> : null}
       </View>
     </View>
+  );
+}
+
+function ZoomButton({ icon, label, onPress, disabled }: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityLabel={label}
+      hitSlop={6}
+      style={[styles.zoomBtn, { borderColor: t.border, opacity: disabled ? 0.35 : 1 }]}>
+      <Ionicons name={icon} size={16} color={t.text} />
+    </Pressable>
   );
 }
 
@@ -238,4 +329,7 @@ const styles = StyleSheet.create({
   legendSwatch: { width: 14, height: 3, borderRadius: 2, borderWidth: 1 },
   legendDashed: { borderStyle: 'dashed', height: 0, borderTopWidth: 2, borderWidth: 0 },
   legendText: { fontSize: 11 },
+  zoomRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' },
+  zoomBtn: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5 },
+  zoomInfo: { fontSize: 11, marginLeft: 4, fontVariant: ['tabular-nums'] },
 });

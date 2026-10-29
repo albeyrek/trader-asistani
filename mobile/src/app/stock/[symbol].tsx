@@ -169,6 +169,7 @@ export default function StockScreen() {
         />
         <View style={{ height: 10 }} />
         <PriceChart
+          key={range}
           all={daily ? s.chart_daily : s.chart_weekly}
           visible={RANGE_BARS[range]}
           levels={levels}
