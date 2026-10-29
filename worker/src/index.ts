@@ -29,6 +29,9 @@ interface Device {
 
 interface State {
   seen: Record<string, number>; // anahtar -> görüldüğü zaman (ms)
+  /** En az bir tur başarıyla bitti mi? Değilse tur "ilk tur" sayılır ve bildirim gönderilmez.
+   *  (Hata kaydı da State yazar; sadece varlığına bakmak bir hatadan sonra bildirim seline yol açar.) */
+  ready?: boolean;
   last?: { at: string; devices: number; watched: number; items: number; fresh: number; sent: number; error?: string };
 }
 
@@ -216,7 +219,7 @@ async function runOnce(env: Env): Promise<State['last']> {
   items = items.filter((it) => relevant(it, meta.names));
 
   const state = (await env.KV.get<State>('state', 'json')) ?? null;
-  const bootstrap = state === null;
+  const bootstrap = !state?.ready;
   const seen = state?.seen ?? {};
   const now = Date.now();
   const fresh: NewsItem[] = [];
@@ -243,7 +246,7 @@ async function runOnce(env: Env): Promise<State['last']> {
     at: new Date().toISOString(), devices: Object.keys(devices).length, watched: watched.size,
     items: items.length, fresh: bootstrap ? 0 : fresh.length, sent, ...(planned > sent ? { error: `${planned - sent} bildirim gönderilemedi` } : {}),
   };
-  await env.KV.put('state', JSON.stringify({ seen, last } satisfies State));
+  await env.KV.put('state', JSON.stringify({ seen, last, ready: true } satisfies State));
   return last;
 }
 
