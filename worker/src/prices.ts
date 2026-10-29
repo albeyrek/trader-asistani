@@ -70,6 +70,29 @@ export function eventText(e: PriceEvent): { title: string; body: string } {
   }
 }
 
+/** Kullanıcının kendi koyduğu fiyat alarmı: "THYAO 245'in altına inerse". */
+export interface CustomAlert {
+  id: string;
+  symbol: string;
+  market: Market;
+  op: 'above' | 'below';
+  price: number;
+}
+
+export function alertTriggered(a: CustomAlert, q: Quote): boolean {
+  return a.op === 'above' ? q.price >= a.price : q.price <= a.price;
+}
+
+export function customAlertText(a: CustomAlert, q: Quote): { title: string; body: string } {
+  const cur = a.market === 'BIST' ? '₺' : '$';
+  const chg = `${q.change_pct >= 0 ? '+' : ''}${q.change_pct.toFixed(1).replace('.', ',')}%`;
+  const dir = a.op === 'above' ? 'üstüne çıktı' : 'altına indi';
+  return {
+    title: `🔔 ${a.symbol}: ${fmt(a.price)} ${cur} ${dir}`,
+    body: `Şu an ${fmt(q.price)} ${cur} · bugün ${chg}${q.delayed ? ' · 15 dk gecikmeli' : ''} · kişisel alarmın`,
+  };
+}
+
 /** Birden çok hissenin fiyatı (sırayla; her biri Cloudflare önbelleğinde 60 sn). */
 export async function fetchQuotes(items: { key: string; yf: string; market: Market }[]): Promise<Record<string, Quote>> {
   const out: Record<string, Quote> = {};

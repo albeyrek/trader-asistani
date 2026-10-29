@@ -61,7 +61,7 @@ def scan_list(
     market: str = Query("BIST", pattern="^(BIST|US)$"),
     view: str = Query("up", alias="list", pattern="^(up|down|alerts|all)$"),
     q: str = "",
-    limit: int = Query(50, ge=1, le=500),
+    limit: int = Query(50, ge=1, le=5000),  # filtre ekranı tüm listeyi ister
 ):
     df = _load(SCAN_FILE)
     df = df[df["market"] == market]

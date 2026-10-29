@@ -1,5 +1,5 @@
 // Gün içi alarm kurallarının testi: npx tsx test/prices.ts
-import { detectEvents, eventText, isFresh, type Levels } from '../src/prices';
+import { alertTriggered, customAlertText, detectEvents, eventText, isFresh, type CustomAlert, type Levels } from '../src/prices';
 import type { Quote } from '../src/quotes';
 
 const now = Date.now();
@@ -31,6 +31,19 @@ for (const [name, got, want] of cases) {
 const fresh = [isFresh(q(1, 1, 10)), isFresh(q(1, 1, 39)), isFresh(q(1, 1, 60 * 20))];
 console.log(`${JSON.stringify(fresh) === '[true,true,false]' ? 'OK ' : 'XX '} tazelik (10 dk, 39 dk, 20 saat): ${JSON.stringify(fresh)}`);
 if (JSON.stringify(fresh) !== '[true,true,false]') fail++;
+
+// Kişisel alarmlar
+const below: CustomAlert = { id: 'a1', symbol: 'THYAO', market: 'BIST', op: 'below', price: 245 };
+const above: CustomAlert = { id: 'a2', symbol: 'AAPL', market: 'US', op: 'above', price: 350 };
+const ca = [
+  alertTriggered(below, q(244.9, 258)), alertTriggered(below, q(245, 258)), alertTriggered(below, q(245.1, 258)),
+  alertTriggered(above, q(350.2, 347, 1, false)), alertTriggered(above, q(349.9, 347, 1, false)),
+];
+const caOk = JSON.stringify(ca) === '[true,true,false,true,false]';
+if (!caOk) fail++;
+console.log(`${caOk ? 'OK ' : 'XX '} kişisel alarm koşulları: ${JSON.stringify(ca)}`);
+const ct = customAlertText(below, q(244.1, 258));
+console.log(`  ${ct.title}\n     ${ct.body}`);
 
 console.log('\nÖrnek bildirim metinleri:');
 for (const e of [...cases[2][1], ...cases[3][1], ...cases[4][1]]) {

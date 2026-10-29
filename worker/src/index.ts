@@ -7,7 +7,10 @@
 // Haber mantığı backend/scanner/watch.py ile aynıdır; kurallar ve eşikler GitHub Pages'teki watch_meta.json'dan gelir.
 
 import { Classifier, trLower, type Rules } from './classify';
-import { detectEvents, eventText, fetchQuotes, isFresh, type Levels, type PriceEvent } from './prices';
+import {
+  alertTriggered, customAlertText, detectEvents, eventText, fetchQuotes, isFresh, type CustomAlert, type Levels,
+  type PriceEvent,
+} from './prices';
 import { yahooSymbol, type Market } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
 
@@ -32,9 +35,13 @@ interface Device {
   watchlist: { symbol: string; market: 'BIST' | 'US' }[];
   notify_all_severe: boolean;
   notify_price_alerts?: boolean; // eski kayıtlarda yok: açık kabul edilir
+  custom_alerts?: CustomAlert[]; // kullanıcının kendi fiyat alarmları (her zaman etkin)
   platform: string;
   updated_at: string;
 }
+
+const MAX_CUSTOM_ALERTS = 50;
+const ALERT_ID_RE = /^[a-z0-9-]{1,40}$/;
 
 interface State {
   seen: Record<string, number>; // anahtar -> görüldüğü zaman (ms)
@@ -94,7 +101,10 @@ async function listDevices(env: Env): Promise<Record<string, Device>> {
 }
 
 async function registerDevice(req: Request, env: Env): Promise<Response> {
-  let body: { token?: unknown; watchlist?: unknown; notify_all_severe?: unknown; notify_price_alerts?: unknown; platform?: unknown };
+  let body: {
+    token?: unknown; watchlist?: unknown; notify_all_severe?: unknown; notify_price_alerts?: unknown;
+    custom_alerts?: unknown; platform?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
@@ -107,10 +117,17 @@ async function registerDevice(req: Request, env: Env): Promise<Response> {
     .filter((w): w is { symbol: string; market: string } => !!w && typeof w.symbol === 'string' && typeof w.market === 'string')
     .map((w) => ({ symbol: w.symbol.toUpperCase(), market: w.market as 'BIST' | 'US' }))
     .filter((w) => SYMBOL_RE.test(w.symbol) && (w.market === 'BIST' || w.market === 'US'));
+  const rawAlerts = Array.isArray(body.custom_alerts) ? body.custom_alerts.slice(0, MAX_CUSTOM_ALERTS) : [];
+  const customAlerts: CustomAlert[] = rawAlerts
+    .filter((a): a is CustomAlert => !!a && typeof a === 'object')
+    .map((a) => ({ id: String(a.id), symbol: String(a.symbol).toUpperCase(), market: a.market, op: a.op, price: Number(a.price) }))
+    .filter((a) => ALERT_ID_RE.test(a.id) && SYMBOL_RE.test(a.symbol) && (a.market === 'BIST' || a.market === 'US')
+      && (a.op === 'above' || a.op === 'below') && Number.isFinite(a.price) && a.price > 0);
   const device: Omit<Device, 'updated_at'> = {
     watchlist,
     notify_all_severe: body.notify_all_severe !== false,
     notify_price_alerts: body.notify_price_alerts !== false,
+    custom_alerts: customAlerts,
     platform: typeof body.platform === 'string' ? body.platform.slice(0, 20) : 'android',
   };
   // KV ücretsiz planda günde 1000 yazma: değişmediyse yazma
@@ -285,8 +302,13 @@ async function quotesEndpoint(url: URL): Promise<Response> {
 }
 
 async function runPrices(env: Env): Promise<PriceState['last']> {
-  const devices = Object.entries(await listDevices(env)).filter(([, d]) => d.notify_price_alerts !== false);
-  const watched = new Set(devices.flatMap(([, d]) => d.watchlist.map((w) => `${w.market}:${w.symbol}`)));
+  const allDevices = Object.entries(await listDevices(env));
+  // Otomatik seviye alarmları tercihe bağlı; kişisel alarmlar her zaman etkin
+  const devices = allDevices.filter(([, d]) => d.notify_price_alerts !== false);
+  const watched = new Set([
+    ...devices.flatMap(([, d]) => d.watchlist.map((w) => `${w.market}:${w.symbol}`)),
+    ...allDevices.flatMap(([, d]) => (d.custom_alerts ?? []).map((a) => `${a.market}:${a.symbol}`)),
+  ]);
   if (!watched.size) return { at: new Date().toISOString(), watched: 0, quotes: 0, fresh: 0, events: 0, sent: 0 };
 
   const levels = (await (await fetch(`${env.DATA_URL}/levels.json`)).json()) as Levels;
@@ -317,15 +339,34 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
       });
     }
   }
+  // Kişisel alarmlar: koşul sağlandığında alarm başına günde bir kez
+  const freshQuotes = Object.fromEntries(fresh);
+  const firedAlerts: string[] = [];
+  for (const [token, dev] of allDevices) {
+    for (const a of dev.custom_alerts ?? []) {
+      const q = freshQuotes[`${a.market}:${a.symbol}`];
+      const k = `${today}|alert|${a.id}`;
+      if (!q || k in state.alerted || !alertTriggered(a, q)) continue;
+      const { title, body } = customAlertText(a, q);
+      messages.push({
+        to: token, title, body, data: { symbol: a.symbol, market: a.market },
+        sound: 'default', priority: 'high', channelId: 'default',
+      });
+      firedAlerts.push(k);
+    }
+  }
+
   const sent = messages.length ? await send(messages, env) : 0;
   const last = {
     at: new Date().toISOString(), watched: watched.size, quotes: Object.keys(quotes).length, fresh: fresh.length,
-    events: newEvents.length, sent, ...(messages.length > sent ? { error: `${messages.length - sent} bildirim gönderilemedi` } : {}),
+    events: newEvents.length + firedAlerts.length, sent,
+    ...(messages.length > sent ? { error: `${messages.length - sent} bildirim gönderilemedi` } : {}),
   };
   for (const e of newEvents) state.alerted[`${today}|${e.key}|${e.kind}`] = last.at;
+  for (const k of firedAlerts) state.alerted[k] = last.at;
   // KV ücretsiz planda günde 1000 yazma: sadece yeni olay olduğunda ya da saatte bir (durum özeti için) yaz
   const prevAt = state.last ? Date.parse(state.last.at) : 0;
-  if (newEvents.length || now - prevAt > 3600_000) {
+  if (newEvents.length || firedAlerts.length || now - prevAt > 3600_000) {
     state.last = last;
     await env.KV.put('price_state', JSON.stringify(state));
   }

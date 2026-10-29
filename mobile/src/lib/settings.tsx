@@ -12,7 +12,17 @@ const MODE_KEY = 'dataMode';
 const WATCHLIST_KEY = 'watchlist';
 const SEVERE_ALL_KEY = 'notifyAllSevere';
 const PRICE_ALERTS_KEY = 'notifyPriceAlerts';
+const CUSTOM_ALERTS_KEY = 'customAlerts';
 const API_PORT = 8000;
+
+/** Kişisel fiyat alarmı: "THYAO 245'in altına inerse" (bulut bekçisi piyasa saatlerinde 5 dakikada bir kontrol eder). */
+export interface CustomAlert {
+  id: string;
+  symbol: string;
+  market: Market;
+  op: 'above' | 'below';
+  price: number;
+}
 
 /** Veri kaynağı: bulut (GitHub Pages + Cloudflare, her yerden çalışır) ya da yerel bilgisayardaki API. */
 export type DataMode = 'cloud' | 'local';
@@ -51,6 +61,9 @@ interface SettingsValue {
   setNotifyAllSevere: (v: boolean) => void;
   notifyPriceAlerts: boolean;
   setNotifyPriceAlerts: (v: boolean) => void;
+  customAlerts: CustomAlert[];
+  addAlert: (a: Omit<CustomAlert, 'id'>) => void;
+  removeAlert: (id: string) => void;
   sync: SyncState;
   resync: () => void;
 }
@@ -64,6 +77,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [notifyAllSevere, setNotifyAllSevereState] = useState(true);
   const [notifyPriceAlerts, setNotifyPriceAlertsState] = useState(true);
+  const [customAlerts, setCustomAlerts] = useState<CustomAlert[]>([]);
   const [push, setPush] = useState<PushStatus | null>(null);
   const [sync, setSync] = useState<SyncState>(null);
   const [syncNonce, setSyncNonce] = useState(0);
@@ -71,13 +85,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [url, wl, severe, savedMode, priceAlerts] = await Promise.all([
+        const [url, wl, severe, savedMode, priceAlerts, alerts] = await Promise.all([
           AsyncStorage.getItem(API_URL_KEY),
           AsyncStorage.getItem(WATCHLIST_KEY),
           AsyncStorage.getItem(SEVERE_ALL_KEY),
           AsyncStorage.getItem(MODE_KEY),
           AsyncStorage.getItem(PRICE_ALERTS_KEY),
+          AsyncStorage.getItem(CUSTOM_ALERTS_KEY),
         ]);
+        if (alerts) setCustomAlerts(JSON.parse(alerts));
         if (priceAlerts != null) setNotifyPriceAlertsState(priceAlerts === 'true');
         if (url) setApiUrlState(url);
         if (savedMode === 'local' || savedMode === 'cloud') setModeState(savedMode);
@@ -109,7 +125,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        token, watchlist, notify_all_severe: notifyAllSevere, notify_price_alerts: notifyPriceAlerts, platform: Platform.OS,
+        token, watchlist, notify_all_severe: notifyAllSevere, notify_price_alerts: notifyPriceAlerts,
+        custom_alerts: customAlerts, platform: Platform.OS,
       }),
     })
       .then((r) => {
@@ -122,7 +139,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, notifyPriceAlerts, syncNonce]);
+  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, notifyPriceAlerts, customAlerts, syncNonce]);
+
+  const addAlert = useCallback((a: Omit<CustomAlert, 'id'>) => {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    setCustomAlerts((prev) => {
+      const next = [...prev, { ...a, id }].slice(-50);
+      AsyncStorage.setItem(CUSTOM_ALERTS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const removeAlert = useCallback((id: string) => {
+    setCustomAlerts((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      AsyncStorage.setItem(CUSTOM_ALERTS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
 
   const setNotifyPriceAlerts = useCallback((v: boolean) => {
     setNotifyPriceAlertsState(v);
@@ -174,11 +208,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setNotifyAllSevere,
       notifyPriceAlerts,
       setNotifyPriceAlerts,
+      customAlerts,
+      addAlert,
+      removeAlert,
       sync,
       resync,
     }),
     [ready, mode, setMode, apiUrl, setApiUrl, watchlist, toggleWatch, push, notifyAllSevere, setNotifyAllSevere,
-      notifyPriceAlerts, setNotifyPriceAlerts, sync, resync],
+      notifyPriceAlerts, setNotifyPriceAlerts, customAlerts, addAlert, removeAlert, sync, resync],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

@@ -21,6 +21,7 @@ function RootStack() {
         }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="stock/[symbol]" options={{ title: '' }} />
+        <Stack.Screen name="screener" options={{ title: 'Filtreler' }} />
       </Stack>
     </>
   );

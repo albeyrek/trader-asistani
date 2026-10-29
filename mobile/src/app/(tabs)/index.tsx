@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -54,15 +55,22 @@ export default function ScanScreen() {
         value={kind}
         onChange={setKind}
       />
-      <TextInput
-        value={query}
-        onChangeText={setQuery}
-        placeholder="Hisse kodu ya da şirket adı ara"
-        placeholderTextColor={t.muted}
-        autoCapitalize="characters"
-        autoCorrect={false}
-        style={[styles.search, { backgroundColor: t.card, borderColor: t.border, color: t.text }]}
-      />
+      <View style={styles.searchRow}>
+        <TextInput
+          value={query}
+          onChangeText={setQuery}
+          placeholder="Hisse kodu ya da şirket adı ara"
+          placeholderTextColor={t.muted}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          style={[styles.search, { backgroundColor: t.card, borderColor: t.border, color: t.text }]}
+        />
+        <Pressable onPress={() => router.push('/screener')} accessibilityLabel="Filtreler"
+          style={[styles.filterBtn, { backgroundColor: t.card, borderColor: t.border }]}>
+          <Ionicons name="funnel-outline" size={18} color={t.accent} />
+          <Text style={[styles.filterText, { color: t.accent }]}>Filtreler</Text>
+        </Pressable>
+      </View>
       <Text style={[styles.hint, { color: t.muted }]}>
         {LIST_HINT[kind]}
         {data ? ` · ${data.total} hisse` : ''}
@@ -105,7 +113,12 @@ export default function ScanScreen() {
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 32 },
   header: { gap: 10, marginBottom: 12 },
-  search: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 15 },
+  searchRow: { flexDirection: 'row', gap: 8 },
+  search: { flex: 1, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 9, fontSize: 15 },
+  filterBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, paddingHorizontal: 10,
+  },
+  filterText: { fontSize: 13, fontWeight: '700' },
   hint: { fontSize: 12 },
   reliability: { borderRadius: 10, padding: 10 },
   reliabilityText: { fontSize: 12, lineHeight: 17 },

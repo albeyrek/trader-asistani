@@ -50,6 +50,10 @@ export async function cloudGet<T>(path: string, signal?: AbortSignal): Promise<T
     const kind = p.get('list') ?? 'up';
     const limit = Number(p.get('limit') ?? 100);
     const q = trUpper((p.get('q') ?? '').trim());
+    if (kind === 'all' && !q) {
+      const items = await index(m, signal);
+      return { total: items.length, items: items.slice(0, limit) } as T;
+    }
     if (!q) {
       const data = await get<ListResponse>(`${m}/${kind}.json`, signal);
       return { total: data.total, items: data.items.slice(0, limit) } as T;

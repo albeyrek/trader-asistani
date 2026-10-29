@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { AlertCard } from '@/components/AlertCard';
 import { FundamentalsCard } from '@/components/FundamentalsCard';
 import { PositionCalculator } from '@/components/PositionCalculator';
 import { PriceChart, type ChartLevel, type ChartType } from '@/components/PriceChart';
@@ -224,6 +225,18 @@ export default function StockScreen() {
         price={livePrice}
         stop={s.stop}
         target={s.levels_daily?.resistances[0]?.price ?? s.target}
+      />
+
+      {/* Kişisel fiyat alarmı */}
+      <AlertCard
+        symbol={s.symbol}
+        market={s.market}
+        price={livePrice}
+        suggestions={[
+          { label: 'Direnç', value: s.levels_daily?.resistances[0]?.price ?? s.resistance },
+          { label: 'Destek', value: s.levels_daily?.supports[0]?.price ?? s.support },
+          { label: 'Stop', value: s.stop },
+        ]}
       />
 
       {/* Seviyeler */}
