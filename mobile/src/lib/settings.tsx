@@ -1,15 +1,22 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
+import { WORKER_URL } from './cloud';
 import { registerForPush, type PushStatus } from './notifications';
 import type { Market } from './types';
 
 const API_URL_KEY = 'apiUrl';
+const MODE_KEY = 'dataMode';
 const WATCHLIST_KEY = 'watchlist';
 const SEVERE_ALL_KEY = 'notifyAllSevere';
 const API_PORT = 8000;
+
+/** Veri kaynağı: bulut (GitHub Pages + Cloudflare, her yerden çalışır) ya da yerel bilgisayardaki API. */
+export type DataMode = 'cloud' | 'local';
+/** useApi/fetchJson için bulut kaynağını belirten özel değer. */
+export const CLOUD = 'cloud';
 
 export interface WatchItem {
   symbol: string;
@@ -29,6 +36,10 @@ export type SyncState = { ok: boolean; at: number; error?: string } | null;
 
 interface SettingsValue {
   ready: boolean;
+  mode: DataMode;
+  setMode: (m: DataMode) => void;
+  /** useApi'nin kullandığı kaynak: CLOUD ya da yerel API adresi */
+  dataSource: string;
   apiUrl: string;
   setApiUrl: (url: string) => void;
   watchlist: WatchItem[];
@@ -45,6 +56,7 @@ const SettingsContext = createContext<SettingsValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
+  const [mode, setModeState] = useState<DataMode>('cloud');
   const [apiUrl, setApiUrlState] = useState(defaultApiUrl);
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [notifyAllSevere, setNotifyAllSevereState] = useState(true);
@@ -55,12 +67,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [url, wl, severe] = await Promise.all([
+        const [url, wl, severe, savedMode] = await Promise.all([
           AsyncStorage.getItem(API_URL_KEY),
           AsyncStorage.getItem(WATCHLIST_KEY),
           AsyncStorage.getItem(SEVERE_ALL_KEY),
+          AsyncStorage.getItem(MODE_KEY),
         ]);
         if (url) setApiUrlState(url);
+        if (savedMode === 'local' || savedMode === 'cloud') setModeState(savedMode);
         if (wl) setWatchlist(JSON.parse(wl));
         if (severe != null) setNotifyAllSevereState(severe === 'true');
       } catch {
@@ -70,14 +84,22 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       }
     })();
     registerForPush().then(setPush);
+    // Uygulama her ön plana geldiğinde kaydı yenile (ilk açılışta izin penceresi yüzünden yarım kalabiliyor)
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s !== 'active') return;
+      registerForPush().then(setPush);
+      setSyncNonce((n) => n + 1);
+    });
+    return () => sub.remove();
   }, []);
 
   // Bildirim adresi, izleme listesi ya da tercih değişince sunucuya bildir
   const token = push?.state === 'ok' ? push.token : null;
+  const deviceUrl = mode === 'cloud' ? WORKER_URL : apiUrl;
   useEffect(() => {
     if (!ready || !token) return;
     let cancelled = false;
-    fetch(`${apiUrl}/api/devices`, {
+    fetch(`${deviceUrl}/api/devices`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token, watchlist, notify_all_severe: notifyAllSevere, platform: Platform.OS }),
@@ -92,7 +114,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [ready, token, apiUrl, watchlist, notifyAllSevere, syncNonce]);
+  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, syncNonce]);
+
+  const setMode = useCallback((m: DataMode) => {
+    setModeState(m);
+    AsyncStorage.setItem(MODE_KEY, m).catch(() => {});
+  }, []);
 
   const setApiUrl = useCallback((url: string) => {
     const clean = url.trim().replace(/\/+$/, '');
@@ -121,6 +148,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<SettingsValue>(
     () => ({
       ready,
+      mode,
+      setMode,
+      dataSource: mode === 'cloud' ? CLOUD : apiUrl,
       apiUrl,
       setApiUrl,
       watchlist,
@@ -132,7 +162,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       sync,
       resync,
     }),
-    [ready, apiUrl, setApiUrl, watchlist, toggleWatch, push, notifyAllSevere, setNotifyAllSevere, sync, resync],
+    [ready, mode, setMode, apiUrl, setApiUrl, watchlist, toggleWatch, push, notifyAllSevere, setNotifyAllSevere, sync, resync],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

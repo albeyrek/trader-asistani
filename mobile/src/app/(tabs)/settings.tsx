@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
-import { Card } from '@/components/ui';
+import { Card, Segmented } from '@/components/ui';
 import { fetchJson, useApi } from '@/lib/api';
 import * as f from '@/lib/format';
 import { useSettings } from '@/lib/settings';
@@ -15,7 +15,7 @@ const okText = (m: Meta) =>
 
 export default function SettingsScreen() {
   const t = useTheme();
-  const { apiUrl, setApiUrl } = useSettings();
+  const { apiUrl, setApiUrl, mode, setMode } = useSettings();
   // null: kullanıcı henüz düzenlemedi, kayıtlı adres gösterilir
   const [draft, setDraft] = useState<string | null>(null);
   const [manual, setManual] = useState<{ status: Status; meta: Meta | null } | null>(null);
@@ -48,10 +48,26 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
-      <Card title="Sunucu adresi">
+      <Card title="Veri kaynağı">
+        <Segmented
+          options={[{ value: 'cloud', label: 'Bulut' }, { value: 'local', label: 'Yerel bilgisayar' }]}
+          value={mode}
+          onChange={(m) => { setMode(m); setManual(null); }}
+        />
+        {mode === 'cloud' ? (
+          <Text style={[styles.text, { color: t.muted, marginTop: 10 }]}>
+            Veriler her iş günü BIST kapanışından (≈18:45) ve ABD kapanışından (≈01:15) sonra bulutta otomatik
+            güncellenir. Bilgisayarın açık olması gerekmez; her yerden çalışır.
+          </Text>
+        ) : null}
+        {status ? <Text style={[styles.text, { color: status.ok ? t.up : t.down, marginTop: 8 }]}>{status.text}</Text> : null}
+      </Card>
+
+      {mode === 'local' ? (
+      <Card title="Yerel sunucu adresi">
         <Text style={[styles.text, { color: t.muted }]}>
-          Uygulama verileri bilgisayarında çalışan API’den alır. Telefon ve bilgisayar aynı Wi-Fi ağında olmalı.
-          Adres genelde http://BILGISAYAR_IP:8000 biçimindedir.
+          Geliştirme ve test için: veriler bilgisayarında çalışan API’den alınır. Telefon ve bilgisayar aynı Wi-Fi
+          ağında olmalı. Adres genelde http://BILGISAYAR_IP:8000 biçimindedir.
         </Text>
         <TextInput
           value={value}
@@ -74,8 +90,8 @@ export default function SettingsScreen() {
             <Text style={[styles.buttonText, { color: t.text }]}>{testing ? 'Deneniyor…' : 'Bağlantıyı dene'}</Text>
           </Pressable>
         </View>
-        {status ? <Text style={[styles.text, { color: status.ok ? t.up : t.down, marginTop: 8 }]}>{status.text}</Text> : null}
       </Card>
+      ) : null}
 
       <NotificationsCard />
 
@@ -111,7 +127,7 @@ export default function SettingsScreen() {
 
 function NotificationsCard() {
   const t = useTheme();
-  const { push, notifyAllSevere, setNotifyAllSevere, sync, resync, watchlist } = useSettings();
+  const { push, notifyAllSevere, setNotifyAllSevere, sync, resync, watchlist, mode } = useSettings();
 
   let status: { text: string; color: string };
   if (!push) status = { text: 'Kontrol ediliyor…', color: t.muted };
@@ -127,7 +143,10 @@ function NotificationsCard() {
       <Text style={[styles.text, { color: status.color }]}>{status.text}</Text>
       <Text style={[styles.text, { color: t.muted, marginTop: 8 }]}>
         İzleme listendeki hisseler için yeni KAP bildirimleri ve önemli haberler gelir. Bildirime dokununca hissenin
-        detayı açılır. Bildirimleri bilgisayardaki haber bekçisi gönderir; bilgisayar kapalıyken bildirim gelmez.
+        detayı açılır.{' '}
+        {mode === 'cloud'
+          ? 'Haber bekçisi bulutta 5 dakikada bir çalışır; bilgisayarın kapalı olması fark etmez.'
+          : 'Yerel modda bildirimleri bilgisayardaki haber bekçisi gönderir; bilgisayar kapalıyken bildirim gelmez.'}
       </Text>
       <View style={[styles.switchRow, { borderTopColor: t.border }]}>
         <Text style={[styles.text, { color: t.text, flex: 1 }]}>

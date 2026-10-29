@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { useSettings } from './settings';
+import { cloudGet } from './cloud';
+import { CLOUD, useSettings } from './settings';
 
 const TIMEOUT_MS = 15000;
 
+/** baseUrl === CLOUD ise veri GitHub Pages'teki statik dosyalardan, değilse yerel API'den gelir. */
 export async function fetchJson<T>(baseUrl: string, path: string): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
+    if (baseUrl === CLOUD) return await cloudGet<T>(path, controller.signal);
     const res = await fetch(`${baseUrl}${path}`, { signal: controller.signal });
     if (!res.ok) {
       let detail = `HTTP ${res.status}`;
@@ -25,7 +28,11 @@ export async function fetchJson<T>(baseUrl: string, path: string): Promise<T> {
       throw new Error('Sunucu yanıt vermedi (zaman aşımı)');
     }
     if (e instanceof TypeError) {
-      throw new Error('Sunucuya bağlanılamadı. Bilgisayardaki API çalışıyor mu, adres doğru mu?');
+      throw new Error(
+        baseUrl === CLOUD
+          ? 'Veriye ulaşılamadı. İnternet bağlantını kontrol et.'
+          : 'Sunucuya bağlanılamadı. Bilgisayardaki API çalışıyor mu, adres doğru mu?',
+      );
     }
     throw e;
   } finally {
@@ -50,15 +57,15 @@ interface Result<T> {
  *  Yükleniyor durumu, son sonucun anahtarı güncel istekle eşleşmiyorsa türetilir (effect içinde senkron setState yok).
  *  Yeni istek sürerken önceki veri ekranda kalır (yenileme sırasında liste boşalmasın). */
 export function useApi<T>(path: string | null): ApiState<T> {
-  const { apiUrl, ready } = useSettings();
+  const { dataSource, ready } = useSettings();
   const [nonce, setNonce] = useState(0);
   const [result, setResult] = useState<Result<T>>({ key: null, data: null, error: null });
-  const key = ready && path !== null ? `${apiUrl}|${path}|${nonce}` : null;
+  const key = ready && path !== null ? `${dataSource}|${path}|${nonce}` : null;
 
   useEffect(() => {
     if (key === null || path === null) return;
     let cancelled = false;
-    fetchJson<T>(apiUrl, path)
+    fetchJson<T>(dataSource, path)
       .then((d) => {
         if (!cancelled) setResult({ key, data: d, error: null });
       })
@@ -68,7 +75,7 @@ export function useApi<T>(path: string | null): ApiState<T> {
     return () => {
       cancelled = true;
     };
-  }, [key, apiUrl, path]);
+  }, [key, dataSource, path]);
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
   const loading = key !== null && result.key !== key;

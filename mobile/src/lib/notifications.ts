@@ -53,8 +53,11 @@ export async function registerForPush(): Promise<PushStatus> {
   }
 }
 
-/** Bildirime dokununca ilgili hissenin detay ekranını açar (uygulama kapalıyken gelenler dahil). */
-export function useNotificationRouting() {
+/** Bildirime dokununca ilgili hissenin detay ekranını açar (uygulama kapalıyken gelenler dahil).
+ *  Web'de bildirim API'si yok; platform çalışma boyunca değişmediği için hook kuralları bozulmaz. */
+export const useNotificationRouting: () => void = Platform.OS === 'web' ? () => {} : useNativeNotificationRouting;
+
+function useNativeNotificationRouting() {
   const last = Notifications.useLastNotificationResponse();
 
   useEffect(() => {
