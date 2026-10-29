@@ -6,6 +6,7 @@ import re
 
 import pandas as pd
 
+from . import levels
 from .indicators import ema
 
 JSON_COLUMNS = ("daily_reasons", "weekly_reasons", "risk_flags", "top_news", "alerts")
@@ -86,6 +87,15 @@ def stock_detail(r: pd.Series, daily: pd.DataFrame, weekly: pd.DataFrame, news: 
     detail = row(r)
     detail["chart_daily"] = chart(daily, (20, 50, 200), DAILY_BARS)
     detail["chart_weekly"] = chart(weekly, (10, 30, 50), WEEKLY_BARS)
+    # Grafik asistanı: çoklu destek/direnç, trend çizgileri, dönem getirileri, yorumlar
+    lv_daily = levels.analyze_levels(daily, DAILY_BARS)
+    lv_weekly = levels.analyze_levels(weekly, WEEKLY_BARS)
+    perf = levels.performance(daily)
+    detail["levels_daily"] = lv_daily
+    detail["levels_weekly"] = lv_weekly
+    detail["performance"] = perf
+    detail["insights"] = levels.insights(lv_daily, lv_weekly, perf, float(r["close"]),
+                                         float(r["high_52w"]), float(r["low_52w"]))
     detail["news"] = news_list(news) if news is not None and len(news) else []
     detail["reliability"] = MODEL_RELIABILITY.get(r["market"])
     return detail

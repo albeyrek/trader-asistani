@@ -51,6 +51,31 @@ export interface Bar {
   ema_slow: number | null;
 }
 
+export interface PriceLevel {
+  price: number;
+  touches: number;
+  dist_pct: number;
+  last_date: string;
+}
+
+export interface TrendLine {
+  kind: 'support' | 'resistance';
+  start: { d: string; price: number };
+  end: { d: string; price: number };
+  slope_pct: number;
+  touches: number;
+  broken: boolean;
+  dist_pct: number;
+}
+
+export interface LevelSet {
+  supports: PriceLevel[];
+  resistances: PriceLevel[];
+  trendlines: TrendLine[];
+}
+
+export type PerformanceKey = '1H' | '1A' | '3A' | '6A' | '1Y';
+
 export interface Reliability {
   level: Level;
   note: string;
@@ -79,6 +104,11 @@ export interface StockDetail extends StockSummary {
   circuit_breakers: number | null;
   chart_daily: Bar[];
   chart_weekly: Bar[];
+  // Grafik asistanı (eski veride olmayabilir)
+  levels_daily?: LevelSet;
+  levels_weekly?: LevelSet;
+  performance?: Record<PerformanceKey, number | null>;
+  insights?: string[];
   news: NewsItem[];
   reliability: Reliability | null;
 }

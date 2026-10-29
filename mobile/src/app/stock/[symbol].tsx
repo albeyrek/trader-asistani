@@ -4,16 +4,22 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { PriceChart, type ChartLevel } from '@/components/PriceChart';
+import { PriceChart, type ChartLevel, type ChartType } from '@/components/PriceChart';
 import { Card, Chip, LevelChip, ScoreBadge, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
 import { quoteKey, useQuotes } from '@/lib/quotes';
 import { useSettings } from '@/lib/settings';
 import { scoreColors, useTheme } from '@/lib/theme';
-import type { Market, NewsItem, StockDetail } from '@/lib/types';
+import type { Market, NewsItem, PerformanceKey, PriceLevel, StockDetail } from '@/lib/types';
 
 type Tf = 'daily' | 'weekly';
+type Range = '1A' | '3A' | '6A' | '1Y' | '2Y';
+const RANGES: Range[] = ['1A', '3A', '6A', '1Y', '2Y'];
+// Görünen mum sayısı: 1Y'ye kadar günlük (iş günü), 2Y haftalık
+const RANGE_BARS: Record<Range, number> = { '1A': 22, '3A': 64, '6A': 127, '1Y': 253, '2Y': 104 };
+const PERF_KEYS: PerformanceKey[] = ['1H', '1A', '3A', '6A', '1Y'];
+const PERF_LABELS: Record<PerformanceKey, string> = { '1H': '1 hafta', '1A': '1 ay', '3A': '3 ay', '6A': '6 ay', '1Y': '1 yıl' };
 const REASONS_COLLAPSED = 6;
 const NEWS_COLLAPSED = 8;
 
@@ -23,7 +29,8 @@ export default function StockScreen() {
   const { isWatched, toggleWatch } = useSettings();
   const path = `/api/stock/${encodeURIComponent(symbol)}${market ? `?market=${market}` : ''}`;
   const { data: s, error, loading, reload } = useApi<StockDetail>(path);
-  const [tf, setTf] = useState<Tf>('daily');
+  const [range, setRange] = useState<Range>('6A');
+  const [chartType, setChartType] = useState<ChartType>('candle');
   const quotes = useQuotes([{ symbol: symbol.toUpperCase(), market: market ?? 'BIST' }]);
   const quote = quotes[quoteKey(symbol.toUpperCase(), market ?? 'BIST')];
 
@@ -57,17 +64,19 @@ export default function StockScreen() {
   const livePrice = quote?.price ?? s.close;
   const liveChange = quote?.change_pct ?? s.change_pct;
   const changeColor = liveChange > 0 ? t.up : liveChange < 0 ? t.down : t.muted;
-  const daily = tf === 'daily';
-  const levels: ChartLevel[] = daily
+  const daily = range !== '2Y';
+  const set = daily ? s.levels_daily : s.levels_weekly;
+  // Çoklu seviyeler (grafik asistanı); eski veride tek destek/direnç
+  const levels: ChartLevel[] = set
     ? [
-        { label: 'Destek', value: s.support, kind: 'support' },
-        { label: 'Direnç', value: s.resistance, kind: 'resistance' },
-        { label: 'Stop', value: s.stop, kind: 'stop' },
+        ...set.supports.map((l, i) => ({ label: `Destek ${i + 1}`, value: l.price, kind: 'support' as const })),
+        ...set.resistances.map((l, i) => ({ label: `Direnç ${i + 1}`, value: l.price, kind: 'resistance' as const })),
       ]
     : [
-        { label: 'Destek', value: s.weekly_support, kind: 'support' },
-        { label: 'Direnç', value: s.weekly_resistance, kind: 'resistance' },
+        { label: 'Destek', value: daily ? s.support : s.weekly_support, kind: 'support' },
+        { label: 'Direnç', value: daily ? s.resistance : s.weekly_resistance, kind: 'resistance' },
       ];
+  if (daily) levels.push({ label: 'Stop', value: s.stop, kind: 'stop' });
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
@@ -125,36 +134,96 @@ export default function StockScreen() {
         </View>
       ) : null}
 
+      {/* Dönem getirileri */}
+      {s.performance ? (
+        <View style={[styles.perfRow, { backgroundColor: t.card, borderColor: t.border }]}>
+          {PERF_KEYS.map((k) => {
+            const v = s.performance?.[k] ?? null;
+            const c = v == null ? t.muted : v > 0 ? t.up : v < 0 ? t.down : t.muted;
+            return (
+              <View key={k} style={styles.perfItem}>
+                <Text style={[styles.perfLabel, { color: t.muted }]}>{PERF_LABELS[k]}</Text>
+                <Text style={[styles.perfValue, { color: c }]}>{f.pct(v, 1)}</Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+
       {/* Grafik */}
       <Card
         title="Grafik"
         right={
-          <View style={{ width: 170 }}>
+          <View style={{ width: 120 }}>
             <Segmented
-              options={[{ value: 'daily', label: 'Günlük' }, { value: 'weekly', label: 'Haftalık' }]}
-              value={tf}
-              onChange={setTf}
+              options={[{ value: 'candle', label: 'Mum' }, { value: 'line', label: 'Çizgi' }]}
+              value={chartType}
+              onChange={setChartType}
             />
           </View>
         }>
+        <Segmented
+          options={RANGES.map((r) => ({ value: r, label: r === '2Y' ? '2Y (hft)' : r }))}
+          value={range}
+          onChange={setRange}
+        />
+        <View style={{ height: 10 }} />
         <PriceChart
-          key={tf}
-          bars={daily ? s.chart_daily : s.chart_weekly}
+          all={daily ? s.chart_daily : s.chart_weekly}
+          visible={RANGE_BARS[range]}
           levels={levels}
+          trendlines={set?.trendlines ?? []}
           market={s.market}
+          type={chartType}
           emaLabels={daily ? ['EMA20', 'EMA50', 'EMA200'] : ['EMA10', 'EMA30', 'EMA50']}
         />
+        <Text style={[styles.note, { color: t.muted }]}>
+          {daily ? 'Günlük mumlar' : 'Haftalık mumlar'}; kesikli çizgiler yatay destek (yeşil) ve direnç (kırmızı),
+          düz çizgiler trend çizgileri. Seviyeler geçmiş tepe ve diplerden otomatik hesaplanır.
+        </Text>
       </Card>
+
+      {/* Asistan notları */}
+      {s.insights?.length ? (
+        <Card title="Asistan notları">
+          {s.insights.map((n) => (
+            <View key={n} style={styles.reason}>
+              <Ionicons name="bulb-outline" size={14} color={t.accent} style={{ marginTop: 2 }} />
+              <Text style={[styles.reasonText, { color: t.text }]}>{n}</Text>
+            </View>
+          ))}
+        </Card>
+      ) : null}
+
+      {/* Destek / direnç tablosu */}
+      {set && (set.supports.length || set.resistances.length) ? (
+        <Card title={`Destek ve dirençler (${daily ? 'günlük' : 'haftalık'})`}>
+          {[...set.resistances].reverse().map((l, i) => (
+            <LevelRow key={`r${l.price}`} label={`Direnç ${set.resistances.length - i}`} level={l} market={s.market} color={t.down} />
+          ))}
+          <View style={[styles.levelNow, { borderColor: t.border }]}>
+            <Text style={[styles.levelNowText, { color: t.text }]}>Şu an {f.price(livePrice, s.market)}</Text>
+          </View>
+          {set.supports.map((l, i) => (
+            <LevelRow key={`s${l.price}`} label={`Destek ${i + 1}`} level={l} market={s.market} color={t.up} />
+          ))}
+        </Card>
+      ) : null}
 
       {/* Seviyeler */}
       <Card title="Seviyeler ve risk">
         {s.at_new_high ? <Chip label="Yeni zirve bölgesi: üstte direnç yok" fg={t.up} bg={t.upBg} /> : null}
         {s.at_new_low ? <Chip label="Dip bölgesi: altta destek yok" fg={t.down} bg={t.downBg} /> : null}
         <View style={styles.grid}>
-          <Stat label="Destek" value={f.price(s.support)} color={t.up} />
-          <Stat label="Direnç" value={f.price(s.resistance)} color={t.down} />
+          {/* Çoklu seviye tablosu varsa tekil destek/direnç tekrar gösterilmez (farklı yöntemle hesaplanır) */}
+          {s.levels_daily ? null : (
+            <>
+              <Stat label="Destek" value={f.price(s.support)} color={t.up} />
+              <Stat label="Direnç" value={f.price(s.resistance)} color={t.down} />
+            </>
+          )}
           <Stat label="Önerilen stop" value={f.price(s.stop)} />
-          <Stat label="Hedef (direnç)" value={f.price(s.target)} />
+          <Stat label="Hedef (son tepe)" value={f.price(s.target)} />
           <Stat label="Risk / getiri" value={s.risk_reward != null ? `1 : ${f.num(s.risk_reward, 2)}` : '—'} />
           <Stat label="Günlük oynaklık (ATR)" value={f.pct(s.atr_pct, 1).replace('+', '')} />
           <Stat label="RSI" value={f.num(s.rsi, 0)} />
@@ -227,6 +296,19 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
     <View style={styles.stat}>
       <Text style={[styles.statLabel, { color: t.muted }]}>{label}</Text>
       <Text style={[styles.statValue, { color: color ?? t.text }]}>{value}</Text>
+    </View>
+  );
+}
+
+function LevelRow({ label, level, market, color }: { label: string; level: PriceLevel; market: Market; color: string }) {
+  const t = useTheme();
+  return (
+    <View style={[styles.levelRow, { borderTopColor: t.border }]}>
+      <View style={[styles.levelDot, { backgroundColor: color }]} />
+      <Text style={[styles.levelLabel, { color: t.muted }]}>{label}</Text>
+      <Text style={[styles.levelPrice, { color: t.text }]}>{f.price(level.price, market)}</Text>
+      <Text style={[styles.levelMeta, { color }]}>{f.pct(level.dist_pct, 1)}</Text>
+      <Text style={[styles.levelMeta, { color: t.muted }]}>{level.touches}× test</Text>
     </View>
   );
 }
@@ -336,4 +418,17 @@ const styles = StyleSheet.create({
   newsTitle: { fontSize: 13, lineHeight: 18 },
   newsMeta: { fontSize: 11, marginTop: 3 },
   disclaimer: { fontSize: 11, textAlign: 'center', marginTop: 8, lineHeight: 16 },
+  perfRow: {
+    flexDirection: 'row', borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 10, marginBottom: 12,
+  },
+  perfItem: { flex: 1, alignItems: 'center', gap: 2 },
+  perfLabel: { fontSize: 11 },
+  perfValue: { fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  levelRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  levelDot: { width: 8, height: 8, borderRadius: 4 },
+  levelLabel: { fontSize: 12, width: 64 },
+  levelPrice: { flex: 1, fontSize: 14, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  levelMeta: { fontSize: 12, fontVariant: ['tabular-nums'], minWidth: 52, textAlign: 'right' },
+  levelNow: { borderTopWidth: 1, borderBottomWidth: 1, borderStyle: 'dashed', paddingVertical: 6, alignItems: 'center' },
+  levelNowText: { fontSize: 12, fontWeight: '700' },
 });
