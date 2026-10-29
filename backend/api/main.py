@@ -67,6 +67,12 @@ def scan_list(
     return {"total": len(df), "items": [views.row(r, views.LIST_FIELDS) for _, r in df.head(limit).iterrows()]}
 
 
+@app.get("/api/levels")
+def price_levels():
+    """Bulutta levels.json ile aynı: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]."""
+    return views.levels_map(_load(SCAN_FILE))
+
+
 @app.get("/api/stocks")
 def stocks(symbols: str):
     """İzleme listesi için: virgülle ayrılmış kodlar (örn. THYAO,AAPL)."""

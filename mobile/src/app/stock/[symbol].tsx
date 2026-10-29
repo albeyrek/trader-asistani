@@ -4,6 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { PositionCalculator } from '@/components/PositionCalculator';
 import { PriceChart, type ChartLevel, type ChartType } from '@/components/PriceChart';
 import { Card, Chip, LevelChip, ScoreBadge, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
@@ -210,6 +211,15 @@ export default function StockScreen() {
           ))}
         </Card>
       ) : null}
+
+      {/* Pozisyon / risk hesaplayıcı */}
+      <PositionCalculator
+        symbol={s.symbol}
+        market={s.market}
+        price={livePrice}
+        stop={s.stop}
+        target={s.levels_daily?.resistances[0]?.price ?? s.target}
+      />
 
       {/* Seviyeler */}
       <Card title="Seviyeler ve risk">

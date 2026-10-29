@@ -87,10 +87,7 @@ def export(out: Path) -> None:
         },
     })
     # Gün içi fiyat alarmları için seviyeler: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]
-    _write(data / "levels.json", {
-        f"{r.market}:{r.symbol}": [r.yf_symbol, *(views.clean(v) for v in (r.close, r.support, r.resistance, r.stop))]
-        for r in scan.itertuples()
-    })
+    _write(data / "levels.json", views.levels_map(scan))
     # GitHub Pages'in Jekyll işlemesini kapat (alt çizgili dosyalar vb. sorun çıkarmasın)
     (out / ".nojekyll").write_text("", encoding="utf-8")
     index = out / "index.html"

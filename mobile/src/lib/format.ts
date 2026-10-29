@@ -11,6 +11,13 @@ export function price(v: number | null | undefined, market?: Market): string {
   return market ? `${s} ${currency(market)}` : s;
 }
 
+/** Para tutarı (kâr/zarar, kayıp): her zaman 2 ondalık, binlik ayraçlı. */
+export function money(v: number | null | undefined, market?: Market): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  const s = v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return market ? `${s} ${currency(market)}` : s;
+}
+
 export function pct(v: number | null | undefined, digits = 2): string {
   if (v == null || !Number.isFinite(v)) return '—';
   const sign = v > 0 ? '+' : '';

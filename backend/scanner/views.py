@@ -64,6 +64,12 @@ def meta(scan: pd.DataFrame, updated_at: pd.Timestamp) -> dict:
     }
 
 
+def levels_map(scan: pd.DataFrame) -> dict:
+    """Gün içi alarmlar ve portföy için: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]."""
+    return {f"{r.market}:{r.symbol}": [r.yf_symbol, *(clean(v) for v in (r.close, r.support, r.resistance, r.stop))]
+            for r in scan.itertuples()}
+
+
 def chart(prices: pd.DataFrame, spans: tuple[int, int, int], bars: int) -> list[dict]:
     p = prices.sort_values("date").reset_index(drop=True)
     c = p["close"]

@@ -38,6 +38,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="portfolio"
+        options={{
+          title: 'Portföy',
+          tabBarIcon: tabIcon('briefcase-outline'),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Ayarlar',

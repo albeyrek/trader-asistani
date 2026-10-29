@@ -2,6 +2,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 import { useNotificationRouting } from '@/lib/notifications';
+import { PortfolioProvider } from '@/lib/portfolio';
 import { SettingsProvider } from '@/lib/settings';
 import { useTheme } from '@/lib/theme';
 
@@ -28,7 +29,9 @@ function RootStack() {
 export default function RootLayout() {
   return (
     <SettingsProvider>
-      <RootStack />
+      <PortfolioProvider>
+        <RootStack />
+      </PortfolioProvider>
     </SettingsProvider>
   );
 }
