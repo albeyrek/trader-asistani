@@ -127,7 +127,9 @@ export default function SettingsScreen() {
 
 function NotificationsCard() {
   const t = useTheme();
-  const { push, notifyAllSevere, setNotifyAllSevere, sync, resync, watchlist, mode } = useSettings();
+  const {
+    push, notifyAllSevere, setNotifyAllSevere, notifyPriceAlerts, setNotifyPriceAlerts, sync, resync, watchlist, mode,
+  } = useSettings();
 
   let status: { text: string; color: string };
   if (!push) status = { text: 'Kontrol ediliyor…', color: t.muted };
@@ -153,6 +155,13 @@ function NotificationsCard() {
           İzleme listesi dışındaki hisselerde de ciddi risk haberlerini bildir (konkordato, SPK tedbiri, dava vb.)
         </Text>
         <Switch value={notifyAllSevere} onValueChange={setNotifyAllSevere} />
+      </View>
+      <View style={[styles.switchRow, { borderTopColor: t.border }]}>
+        <Text style={[styles.text, { color: t.text, flex: 1 }]}>
+          Gün içi fiyat alarmları: izleme listendeki hisse stop seviyesinin altına inerse, desteği/direnci kırarsa ya da
+          günde %5’ten fazla hareket ederse bildir (piyasa saatlerinde 5 dakikada bir; BIST 15 dk gecikmeli)
+        </Text>
+        <Switch value={notifyPriceAlerts} onValueChange={setNotifyPriceAlerts} />
       </View>
       {push?.state === 'ok' && !sync?.ok ? (
         <Pressable onPress={resync} style={[styles.button, styles.buttonOutline, { borderColor: t.border, marginTop: 8 }]}>

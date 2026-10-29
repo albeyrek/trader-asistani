@@ -11,6 +11,7 @@ const API_URL_KEY = 'apiUrl';
 const MODE_KEY = 'dataMode';
 const WATCHLIST_KEY = 'watchlist';
 const SEVERE_ALL_KEY = 'notifyAllSevere';
+const PRICE_ALERTS_KEY = 'notifyPriceAlerts';
 const API_PORT = 8000;
 
 /** Veri kaynağı: bulut (GitHub Pages + Cloudflare, her yerden çalışır) ya da yerel bilgisayardaki API. */
@@ -48,6 +49,8 @@ interface SettingsValue {
   push: PushStatus | null;
   notifyAllSevere: boolean;
   setNotifyAllSevere: (v: boolean) => void;
+  notifyPriceAlerts: boolean;
+  setNotifyPriceAlerts: (v: boolean) => void;
   sync: SyncState;
   resync: () => void;
 }
@@ -60,6 +63,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [apiUrl, setApiUrlState] = useState(defaultApiUrl);
   const [watchlist, setWatchlist] = useState<WatchItem[]>([]);
   const [notifyAllSevere, setNotifyAllSevereState] = useState(true);
+  const [notifyPriceAlerts, setNotifyPriceAlertsState] = useState(true);
   const [push, setPush] = useState<PushStatus | null>(null);
   const [sync, setSync] = useState<SyncState>(null);
   const [syncNonce, setSyncNonce] = useState(0);
@@ -67,12 +71,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [url, wl, severe, savedMode] = await Promise.all([
+        const [url, wl, severe, savedMode, priceAlerts] = await Promise.all([
           AsyncStorage.getItem(API_URL_KEY),
           AsyncStorage.getItem(WATCHLIST_KEY),
           AsyncStorage.getItem(SEVERE_ALL_KEY),
           AsyncStorage.getItem(MODE_KEY),
+          AsyncStorage.getItem(PRICE_ALERTS_KEY),
         ]);
+        if (priceAlerts != null) setNotifyPriceAlertsState(priceAlerts === 'true');
         if (url) setApiUrlState(url);
         if (savedMode === 'local' || savedMode === 'cloud') setModeState(savedMode);
         if (wl) setWatchlist(JSON.parse(wl));
@@ -102,7 +108,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     fetch(`${deviceUrl}/api/devices`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, watchlist, notify_all_severe: notifyAllSevere, platform: Platform.OS }),
+      body: JSON.stringify({
+        token, watchlist, notify_all_severe: notifyAllSevere, notify_price_alerts: notifyPriceAlerts, platform: Platform.OS,
+      }),
     })
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -114,7 +122,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, syncNonce]);
+  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, notifyPriceAlerts, syncNonce]);
+
+  const setNotifyPriceAlerts = useCallback((v: boolean) => {
+    setNotifyPriceAlertsState(v);
+    AsyncStorage.setItem(PRICE_ALERTS_KEY, String(v)).catch(() => {});
+  }, []);
 
   const setMode = useCallback((m: DataMode) => {
     setModeState(m);
@@ -159,10 +172,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       push,
       notifyAllSevere,
       setNotifyAllSevere,
+      notifyPriceAlerts,
+      setNotifyPriceAlerts,
       sync,
       resync,
     }),
-    [ready, mode, setMode, apiUrl, setApiUrl, watchlist, toggleWatch, push, notifyAllSevere, setNotifyAllSevere, sync, resync],
+    [ready, mode, setMode, apiUrl, setApiUrl, watchlist, toggleWatch, push, notifyAllSevere, setNotifyAllSevere,
+      notifyPriceAlerts, setNotifyPriceAlerts, sync, resync],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

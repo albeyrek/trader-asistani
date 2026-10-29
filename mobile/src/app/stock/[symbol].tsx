@@ -8,6 +8,7 @@ import { PriceChart, type ChartLevel } from '@/components/PriceChart';
 import { Card, Chip, LevelChip, ScoreBadge, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
+import { quoteKey, useQuotes } from '@/lib/quotes';
 import { useSettings } from '@/lib/settings';
 import { scoreColors, useTheme } from '@/lib/theme';
 import type { Market, NewsItem, StockDetail } from '@/lib/types';
@@ -23,6 +24,8 @@ export default function StockScreen() {
   const path = `/api/stock/${encodeURIComponent(symbol)}${market ? `?market=${market}` : ''}`;
   const { data: s, error, loading, reload } = useApi<StockDetail>(path);
   const [tf, setTf] = useState<Tf>('daily');
+  const quotes = useQuotes([{ symbol: symbol.toUpperCase(), market: market ?? 'BIST' }]);
+  const quote = quotes[quoteKey(symbol.toUpperCase(), market ?? 'BIST')];
 
   const watched = s ? isWatched(s.symbol, s.market) : false;
   const header = (
@@ -51,7 +54,9 @@ export default function StockScreen() {
     );
   }
 
-  const changeColor = s.change_pct > 0 ? t.up : s.change_pct < 0 ? t.down : t.muted;
+  const livePrice = quote?.price ?? s.close;
+  const liveChange = quote?.change_pct ?? s.change_pct;
+  const changeColor = liveChange > 0 ? t.up : liveChange < 0 ? t.down : t.muted;
   const daily = tf === 'daily';
   const levels: ChartLevel[] = daily
     ? [
@@ -77,8 +82,9 @@ export default function StockScreen() {
           </Text>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={[styles.price, { color: t.text }]}>{f.price(s.close, s.market)}</Text>
-          <Text style={[styles.change, { color: changeColor }]}>{f.pct(s.change_pct)}</Text>
+          <Text style={[styles.price, { color: t.text }]}>{f.price(livePrice, s.market)}</Text>
+          <Text style={[styles.change, { color: changeColor }]}>{f.pct(liveChange)}</Text>
+          {quote ? <Text style={[styles.sub, { color: t.muted }]}>{f.quoteTime(quote)}</Text> : null}
         </View>
       </View>
 

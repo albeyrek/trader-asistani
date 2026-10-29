@@ -5,12 +5,16 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Chip, ScoreBadge } from '@/components/ui';
 import * as f from '@/lib/format';
+import type { Quote } from '@/lib/quotes';
 import { levelColors, scoreColors, useTheme } from '@/lib/theme';
 import type { StockSummary } from '@/lib/types';
 
-function StockRowBase({ item, onRemove }: { item: StockSummary; onRemove?: () => void }) {
+/** quote verilirse gün içi fiyat ve günlük değişim gösterilir; yoksa son kapanış. */
+function StockRowBase({ item, quote, onRemove }: { item: StockSummary; quote?: Quote; onRemove?: () => void }) {
   const t = useTheme();
-  const changeColor = item.change_pct > 0 ? t.up : item.change_pct < 0 ? t.down : t.muted;
+  const price = quote?.price ?? item.close;
+  const change = quote?.change_pct ?? item.change_pct;
+  const changeColor = change > 0 ? t.up : change < 0 ? t.down : t.muted;
   const outlook = scoreColors(t, item.combined_score);
   const risk = levelColors(t, item.overall_risk);
 
@@ -32,8 +36,9 @@ function StockRowBase({ item, onRemove }: { item: StockSummary; onRemove?: () =>
         </View>
       </View>
       <View style={styles.right}>
-        <Text style={[styles.price, { color: t.text }]}>{f.price(item.close, item.market)}</Text>
-        <Text style={[styles.change, { color: changeColor }]}>{f.pct(item.change_pct)}</Text>
+        <Text style={[styles.price, { color: t.text }]}>{f.price(price, item.market)}</Text>
+        <Text style={[styles.change, { color: changeColor }]}>{f.pct(change)}</Text>
+        {quote ? <Text style={[styles.quoteTime, { color: t.muted }]}>{f.quoteTime(quote)}</Text> : null}
         <ScoreBadge value={item.combined_score} />
       </View>
       {onRemove ? (
@@ -65,5 +70,6 @@ const styles = StyleSheet.create({
   right: { alignItems: 'flex-end', gap: 3 },
   price: { fontSize: 15, fontWeight: '600', fontVariant: ['tabular-nums'] },
   change: { fontSize: 12, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  quoteTime: { fontSize: 10 },
   remove: { marginLeft: 2 },
 });

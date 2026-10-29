@@ -34,6 +34,17 @@ export function date(iso: string | null | undefined): string {
   return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
 }
 
+/** Gün içi fiyatın zamanı: bugünse saat, değilse tarih; BIST için gecikme notu. "14:30 · 15 dk gecikmeli" */
+export function quoteTime(q: { time: string; delayed: boolean }): string {
+  const d = new Date(q.time);
+  if (Number.isNaN(d.getTime())) return '';
+  const today = new Date().toDateString() === d.toDateString();
+  const when = today
+    ? d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+  return q.delayed ? `${when} · 15 dk gecikmeli` : `${when} · anlık`;
+}
+
 export function marketLabel(m: Market): string {
   return m === 'US' ? 'ABD' : 'BIST';
 }
