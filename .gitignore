@@ -8,6 +8,11 @@ node_modules/
 backend/data/
 site/
 
+# Cloudflare Worker: yerel geliştirme durumu ve test verisi
+# (fixture.json gerçek haber başlıkları içerir; python -m scanner.parity_fixture ile üretilir)
+worker/.wrangler/
+worker/test/fixture.json
+
 # Yerel yardımcı dosyalar
 *_qr.png
 /.claude/

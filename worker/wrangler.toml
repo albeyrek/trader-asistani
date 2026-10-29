@@ -1,0 +1,15 @@
+name = "trader-asistani"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[vars]
+DATA_URL = "https://albeyrek.github.io/trader-asistani/data"
+
+# Cihazlar ve görülen haberler (ücretsiz KV: günde 100 bin okuma, 1000 yazma)
+[[kv_namespaces]]
+binding = "KV"
+id = "23435a86d35245a0888123dc7c3a5b1e"
+
+# Haber bekçisi: 5 dakikada bir
+[triggers]
+crons = ["*/5 * * * *"]

@@ -8,7 +8,8 @@ site/data/
   {BIST,US}/alerts.json         uyarısı olan hisseler
   {BIST,US}/index.json          tüm hisselerin özet satırları (arama ve izleme listesi telefonda yapılır)
   stock/{BIST,US}/{KOD}.json    hisse detayı (grafik, gerekçeler, haberler)
-  watch_meta.json               haber bekçisi (Cloudflare Worker) için hisse kodları ve şirket adı anahtarları
+  watch_meta.json               haber bekçisi (Cloudflare Worker) için hisse kodları, şirket adı anahtarları,
+                                sınıflandırma kuralları ve eşikler (tek kaynak: Python kodu)
 """
 import argparse
 import json
@@ -20,9 +21,11 @@ import pandas as pd
 
 from . import views
 from .config import DATA_DIR, ROOT
-from .news import ITEMS_FILE, _name_token
+from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
 from .scan import RESULTS_FILE
+from .sentiment import rules_json
+from .watch import MAX_PER_DEVICE, MIN_ABS_SENTIMENT
 
 TOP_N = 100
 
@@ -74,6 +77,13 @@ def export(out: Path) -> None:
         "bist": sorted(scan.loc[scan["market"] == "BIST", "symbol"]),
         "names": {f"{r.market}:{r.symbol}": _name_token(r.name) for r in scan.itertuples()},
         "yf": {r.symbol: r.yf_symbol for r in scan[scan["market"] == "US"].itertuples()},
+        "rules": rules_json(),
+        "thresholds": {
+            "high_severity": HIGH_SEVERITY,
+            "soft_categories": sorted(SOFT_CATEGORIES),
+            "min_abs_sentiment": MIN_ABS_SENTIMENT,
+            "max_per_device": MAX_PER_DEVICE,
+        },
     })
     # GitHub Pages'in Jekyll işlemesini kapat (alt çizgili dosyalar vb. sorun çıkarmasın)
     (out / ".nojekyll").write_text("", encoding="utf-8")

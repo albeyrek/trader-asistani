@@ -165,6 +165,22 @@ def _apply(text: str, rules) -> tuple[float, list[str], list[str]]:
     return total, cats, matches
 
 
+def rules_json() -> dict:
+    """Kuralların taşınabilir hali: Cloudflare'deki haber bekçisi (JavaScript) aynı kuralları buradan okur.
+    Desenler Python sözdizimindedir; JS tarafı \\w ve \\b'yi Unicode'a uygun karşılıklarına çevirir."""
+    def rules(rs):
+        return [[p, w, c] for p, w, c in rs]
+    return {
+        "tr": rules(TR_RULES),
+        "en": rules(EN_RULES),
+        "kap_subject": rules(KAP_SUBJECT_RULES),
+        "kap_routine": KAP_ROUTINE.pattern,
+        "multi_tr": MULTI_STOCK_TR.pattern,
+        "multi_en": MULTI_STOCK_EN.pattern,
+        "multi_factor": MULTI_STOCK_FACTOR,
+    }
+
+
 def classify(title: str, summary: str = "", lang: str = "tr", kap_subject: str = "") -> Classification:
     subject = tr_lower(kap_subject)
     if subject and KAP_ROUTINE.search(subject):
