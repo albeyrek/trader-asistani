@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from scanner import views
+from scanner import market, views
 from scanner.config import DATA_DIR
 from scanner.devices import upsert_device
 from scanner.prices import PRICE_FILE, to_weekly
@@ -65,6 +65,12 @@ def scan_list(
     else:
         df = df.sort_values("symbol")
     return {"total": len(df), "items": [views.row(r, views.LIST_FIELDS) for _, r in df.head(limit).iterrows()]}
+
+
+@app.get("/api/market")
+def market_overview():
+    """Piyasa rejimi (bulutta market.json)."""
+    return market.overview(_load(PRICE_FILE), _load(SCAN_FILE))
 
 
 @app.get("/api/levels")

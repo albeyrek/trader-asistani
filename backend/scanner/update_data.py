@@ -6,7 +6,7 @@ import warnings
 # yfinance, pandas 3.x ile kullanım dışı uyarıları basıyor; çıktıyı kirletmesin
 warnings.filterwarnings("ignore", module="yfinance")
 
-from .config import DATA_DIR
+from .config import DATA_DIR, INDEX_SYMBOLS
 from .liquidity import liquidity_table
 from .prices import update_prices
 from .universe import build_universe, load_universe
@@ -28,6 +28,8 @@ def main() -> None:
     if args.market:
         universe = universe[universe["market"] == args.market]
     symbols = universe["yf_symbol"].tolist()[: args.limit]
+    markets = [args.market] if args.market else list(INDEX_SYMBOLS)
+    symbols += [s for m in markets for s in INDEX_SYMBOLS[m]]  # endeksler, VIX, USD/TRY
     print(f"{len(symbols)} sembol için fiyatlar indiriliyor...")
 
     prices = update_prices(symbols)

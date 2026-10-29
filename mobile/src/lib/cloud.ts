@@ -43,6 +43,7 @@ export async function cloudGet<T>(path: string, signal?: AbortSignal): Promise<T
 
   if (url.pathname === '/api/meta') return get<T>('meta.json', signal);
   if (url.pathname === '/api/levels') return get<T>('levels.json', signal);
+  if (url.pathname === '/api/market') return get<T>('market.json', signal);
 
   if (url.pathname === '/api/scan') {
     const m = market(p.get('market'));

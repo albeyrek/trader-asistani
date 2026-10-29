@@ -11,6 +11,7 @@ site/data/
   watch_meta.json               haber bekçisi (Cloudflare Worker) için hisse kodları, şirket adı anahtarları,
                                 sınıflandırma kuralları ve eşikler (tek kaynak: Python kodu)
   levels.json                   gün içi alarmlar için son kapanış, destek, direnç, stop seviyeleri
+  market.json                   piyasa rejimi: endeksler, genişlik ve geçmişi, rejim etiketi
 """
 import argparse
 import json
@@ -20,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import views
+from . import market, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -59,8 +60,8 @@ def export(out: Path) -> None:
         _write(data / market / "alerts.json", _list(alerts))
         _write(data / market / "index.json", _list(g.sort_values("symbol")))
 
-    prices = load_prices()
-    prices = prices[prices["yf_symbol"].isin(scan["yf_symbol"])]
+    all_prices = load_prices()  # endeksler dahil
+    prices = all_prices[all_prices["yf_symbol"].isin(scan["yf_symbol"])]
     daily = dict(tuple(prices.groupby("yf_symbol")))
     weekly = dict(tuple(to_weekly(prices).groupby("yf_symbol")))
     news_by = dict(tuple(news.groupby(["market", "symbol"]))) if news is not None else {}
@@ -86,6 +87,8 @@ def export(out: Path) -> None:
             "max_per_device": MAX_PER_DEVICE,
         },
     })
+    # Piyasa rejimi: endeksler, genişlik, rejim etiketi (tüm fiyatlar gerekir: endeksler taranan hisselerde değil)
+    _write(data / "market.json", market.overview(all_prices, scan))
     # Gün içi fiyat alarmları için seviyeler: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]
     _write(data / "levels.json", views.levels_map(scan))
     # GitHub Pages'in Jekyll işlemesini kapat (alt çizgili dosyalar vb. sorun çıkarmasın)

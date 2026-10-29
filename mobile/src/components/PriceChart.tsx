@@ -62,7 +62,7 @@ function touchInfo(e: GestureResponderEvent): { n: number; dist: number; mid: nu
  * all: tüm geçmiş (trend çizgilerinin başlangıcını bulmak için), visible: başlangıçta görünen son mum sayısı.
  * Yakınlaştırma: iki parmakla sıkıştırma / sürükleme ya da alttaki düğmeler. Tek parmak: mum değerlerini okuma.
  */
-export function PriceChart({ all, visible, levels, trendlines, market, emaLabels, type }: {
+export function PriceChart({ all, visible, levels, trendlines, market, emaLabels, type, unitless }: {
   all: Bar[];
   visible: number;
   levels: ChartLevel[];
@@ -70,6 +70,8 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
   market: Market;
   emaLabels: [string, string, string];
   type: ChartType;
+  /** Endeks gibi para birimi olmayan seriler için (₺/$ gösterilmez) */
+  unitless?: boolean;
 }) {
   const t = useTheme();
   const [width, setWidth] = useState(0);
@@ -190,7 +192,7 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
           {shown.d}
           {hover == null ? ` · dönem ${f.pct(periodChange, 1)}` : ''}
         </Text>
-        <Text style={[styles.readoutPrice, { color: t.text }]}>{f.price(shown.close, market)}</Text>
+        <Text style={[styles.readoutPrice, { color: t.text }]}>{f.price(shown.close, unitless ? undefined : market)}</Text>
         <Text style={[styles.readoutSub, { color: t.muted }]}>
           A {f.price(shown.open)} · Y {f.price(shown.high)} · D {f.price(shown.low)} · K {f.price(shown.close)}
         </Text>
@@ -281,8 +283,8 @@ export function PriceChart({ all, visible, levels, trendlines, market, emaLabels
         <LegendItem color={t.emaFast} label={emaLabels[0]} />
         <LegendItem color={t.emaMid} label={emaLabels[1]} />
         <LegendItem color={t.emaSlow} label={emaLabels[2]} />
-        <LegendItem color={t.up} label="Destek" dashed />
-        <LegendItem color={t.down} label="Direnç" dashed />
+        {levels.some((l) => l.kind === 'support' && l.value != null) ? <LegendItem color={t.up} label="Destek" dashed /> : null}
+        {levels.some((l) => l.kind === 'resistance' && l.value != null) ? <LegendItem color={t.down} label="Direnç" dashed /> : null}
         {levels.some((l) => l.kind === 'stop' && l.value != null) ? <LegendItem color={t.muted} label="Stop" dashed /> : null}
         {lines.length ? <LegendItem color={t.text} label="Trend çizgisi" /> : null}
       </View>

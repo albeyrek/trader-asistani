@@ -31,6 +31,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="market"
+        options={{
+          title: 'Piyasa',
+          tabBarIcon: tabIcon('pulse'),
+        }}
+      />
+      <Tabs.Screen
         name="watchlist"
         options={{
           title: 'İzleme',

@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
+import { router } from 'expo-router';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { StockRow } from '@/components/StockRow';
 import { Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
-import { levelColors, useTheme } from '@/lib/theme';
-import type { Market, Meta, StockSummary } from '@/lib/types';
+import { levelColors, regimeColors, useTheme } from '@/lib/theme';
+import type { Market, MarketOverview, Meta, StockSummary } from '@/lib/types';
 
 type ListKind = 'up' | 'down' | 'alerts';
 
@@ -31,6 +32,9 @@ export default function ScanScreen() {
   const path = `/api/scan?market=${market}&list=${kind}&limit=100${debounced ? `&q=${encodeURIComponent(debounced)}` : ''}`;
   const { data, error, loading, reload } = useApi<{ total: number; items: StockSummary[] }>(path);
   const meta = useApi<Meta>('/api/meta');
+  const marketData = useApi<MarketOverview>('/api/market');
+  const regime = marketData.data?.[market]?.regime;
+  const rgc = regime ? regimeColors(t, regime.score) : null;
   const reliability = meta.data?.reliability[market];
   const relColors = levelColors(t, reliability?.level === 'Düşük' ? 'Yüksek' : reliability?.level === 'Orta' ? 'Orta' : 'Düşük');
 
@@ -64,6 +68,14 @@ export default function ScanScreen() {
         {data ? ` · ${data.total} hisse` : ''}
         {meta.data ? ` · veri: ${f.date(meta.data.last_date)}` : ''}
       </Text>
+      {regime && rgc ? (
+        <Pressable onPress={() => router.push('/market')} style={[styles.reliability, styles.regime, { backgroundColor: rgc.bg }]}>
+          <Text style={[styles.regimeText, { color: rgc.fg }]}>
+            Piyasa rejimi: {regime.label} ({regime.score > 0 ? '+' : ''}{regime.score}/5)
+          </Text>
+          <Text style={[styles.reliabilityText, { color: rgc.fg }]}>Ayrıntı ›</Text>
+        </Pressable>
+      ) : null}
       {reliability ? (
         <View style={[styles.reliability, { backgroundColor: relColors.bg }]}>
           <Text style={[styles.reliabilityText, { color: relColors.fg }]}>
@@ -97,4 +109,6 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12 },
   reliability: { borderRadius: 10, padding: 10 },
   reliabilityText: { fontSize: 12, lineHeight: 17 },
+  regime: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  regimeText: { fontSize: 13, fontWeight: '700' },
 });

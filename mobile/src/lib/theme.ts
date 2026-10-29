@@ -54,6 +54,14 @@ export function scoreColors(t: Theme, score: number | null | undefined): { fg: s
   return { fg: t.muted, bg: t.neutralBg };
 }
 
+/** Piyasa rejimi rengi: puan -5 (ayı) .. +5 (boğa) */
+export function regimeColors(t: Theme, score: number): { fg: string; bg: string } {
+  if (score >= 1) return { fg: t.up, bg: t.upBg };
+  if (score <= -3) return { fg: t.down, bg: t.downBg };
+  if (score <= -1) return { fg: t.warn, bg: t.warnBg };
+  return { fg: t.muted, bg: t.neutralBg };
+}
+
 export function levelColors(t: Theme, level: Level | null | undefined): { fg: string; bg: string } {
   if (level === 'Yüksek') return { fg: t.down, bg: t.downBg };
   if (level === 'Orta') return { fg: t.warn, bg: t.warnBg };

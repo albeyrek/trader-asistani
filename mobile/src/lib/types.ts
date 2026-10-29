@@ -113,6 +113,47 @@ export interface StockDetail extends StockSummary {
   reliability: Reliability | null;
 }
 
+export interface IndexSnapshot {
+  symbol: string;
+  name: string;
+  close: number;
+  date: string;
+  chg_1d: number | null;
+  chg_1m: number | null;
+  chg_3m: number | null;
+  chg_1y: number | null;
+  above_ema200: boolean;
+  ema50_rising: boolean;
+}
+
+export interface MarketRegime {
+  score: number; // -5..+5
+  label: 'Boğa' | 'Temkinli boğa' | 'Nötr' | 'Zayıf' | 'Ayı';
+  summary: string;
+  factors: { text: string; signal: number }[];
+}
+
+export interface MarketData {
+  index_name: string;
+  regime: MarketRegime;
+  indices: IndexSnapshot[];
+  breadth: {
+    pct_above_50: number;
+    pct_above_200: number;
+    advancers: number;
+    decliners: number;
+    new_highs: number;
+    new_lows: number;
+    median_1m: number | null;
+    stocks: number;
+  };
+  breadth_history: { d: string; a50: number; a200: number }[];
+  outlook: Partial<Record<Outlook, number>>;
+  chart: Bar[];
+}
+
+export type MarketOverview = Partial<Record<Market, MarketData>>;
+
 export interface Meta {
   last_date: string;
   updated_at: string;

@@ -11,6 +11,14 @@ UPDATE_PERIOD = "1mo"     # Sonraki güncellemelerde çekilecek son dönem
 CHUNK_SIZE = 150          # yfinance'e tek seferde gönderilecek sembol sayısı
 CHUNK_PAUSE_SEC = 1.0     # İstek limitine takılmamak için gruplar arası bekleme
 
+# Piyasa rejimi ve göreli güç için endeksler (Yahoo kodları): piyasa -> {kod: ad}
+INDEX_SYMBOLS = {
+    "BIST": {"XU100.IS": "BIST 100", "XU030.IS": "BIST 30", "USDTRY=X": "USD/TRY"},
+    "US": {"^GSPC": "S&P 500", "^NDX": "Nasdaq 100", "^VIX": "VIX"},
+}
+# Her piyasanın ana endeksi (rejim ve göreli güç bununla hesaplanır)
+MAIN_INDEX = {"BIST": "XU100.IS", "US": "^GSPC"}
+
 # Likidite filtresi: 20 günlük ortalama işlem hacmi (yerel para birimi cinsinden)
 MIN_AVG_TURNOVER = {"US": 1_000_000, "BIST": 10_000_000}  # 1M USD / 10M TL
 MIN_PRICE = {"US": 1.0, "BIST": 1.0}
