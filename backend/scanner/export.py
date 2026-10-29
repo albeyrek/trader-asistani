@@ -10,6 +10,7 @@ site/data/
   stock/{BIST,US}/{KOD}.json    hisse detayı (grafik, gerekçeler, haberler)
   watch_meta.json               haber bekçisi (Cloudflare Worker) için hisse kodları, şirket adı anahtarları,
                                 sınıflandırma kuralları ve eşikler (tek kaynak: Python kodu)
+  levels.json                   gün içi alarmlar için son kapanış, destek, direnç, stop seviyeleri
 """
 import argparse
 import json
@@ -84,6 +85,11 @@ def export(out: Path) -> None:
             "min_abs_sentiment": MIN_ABS_SENTIMENT,
             "max_per_device": MAX_PER_DEVICE,
         },
+    })
+    # Gün içi fiyat alarmları için seviyeler: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]
+    _write(data / "levels.json", {
+        f"{r.market}:{r.symbol}": [r.yf_symbol, *(views.clean(v) for v in (r.close, r.support, r.resistance, r.stop))]
+        for r in scan.itertuples()
     })
     # GitHub Pages'in Jekyll işlemesini kapat (alt çizgili dosyalar vb. sorun çıkarmasın)
     (out / ".nojekyll").write_text("", encoding="utf-8")

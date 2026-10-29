@@ -10,6 +10,8 @@ DATA_URL = "https://albeyrek.github.io/trader-asistani/data"
 binding = "KV"
 id = "23435a86d35245a0888123dc7c3a5b1e"
 
-# Haber bekçisi: 5 dakikada bir
+# 1) Haber bekçisi: 5 dakikada bir
+# 2) Gün içi fiyat alarmları: hafta içi 07-21 UTC (BIST 10:00-18:10, ABD 16:30-24:00 TR) 5 dakikada bir
+#    (ifade src/index.ts içindeki PRICE_CRON ile aynı olmalı)
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["*/5 * * * *", "*/5 7-21 * * 1-5"]

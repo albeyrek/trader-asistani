@@ -1,11 +1,19 @@
 // Trader Asistanı bulut bekçisi (Cloudflare Worker)
 //  - POST /api/devices : uygulama bildirim adresini ve izleme listesini kaydeder (KV)
-//  - GET  /api/status  : son turun özeti
+//  - GET  /api/quotes  : izleme listesi için gün içi fiyatlar (?s=BIST:THYAO,US:AAPL)
+//  - GET  /api/status  : son turların özeti
 //  - her 5 dakikada (cron): KAP + izlenen hisselerin haberleri -> sınıflandır -> yenileri bildirim olarak gönder
-// Mantık backend/scanner/watch.py ile aynıdır; kurallar ve eşikler GitHub Pages'teki watch_meta.json'dan gelir.
+//  - piyasa saatlerinde 5 dakikada (ayrı cron): izlenen hisselerin fiyatı -> seviye kırılımı/sert hareket bildirimi
+// Haber mantığı backend/scanner/watch.py ile aynıdır; kurallar ve eşikler GitHub Pages'teki watch_meta.json'dan gelir.
 
 import { Classifier, trLower, type Rules } from './classify';
+import { detectEvents, eventText, fetchQuotes, isFresh, type Levels, type PriceEvent } from './prices';
+import { yahooSymbol, type Market } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
+
+// wrangler.toml'daki ikinci cron ile aynı olmalı (UTC; BIST 07:00-15:10, ABD 13:30-21:00 arası)
+const PRICE_CRON = '*/5 7-21 * * 1-5';
+const MAX_QUOTES = 40; // ücretsiz planda tur başına 50 alt istek sınırı
 
 export interface Env {
   KV: KVNamespace;
@@ -23,6 +31,7 @@ interface WatchMeta {
 interface Device {
   watchlist: { symbol: string; market: 'BIST' | 'US' }[];
   notify_all_severe: boolean;
+  notify_price_alerts?: boolean; // eski kayıtlarda yok: açık kabul edilir
   platform: string;
   updated_at: string;
 }
@@ -85,7 +94,7 @@ async function listDevices(env: Env): Promise<Record<string, Device>> {
 }
 
 async function registerDevice(req: Request, env: Env): Promise<Response> {
-  let body: { token?: unknown; watchlist?: unknown; notify_all_severe?: unknown; platform?: unknown };
+  let body: { token?: unknown; watchlist?: unknown; notify_all_severe?: unknown; notify_price_alerts?: unknown; platform?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -101,6 +110,7 @@ async function registerDevice(req: Request, env: Env): Promise<Response> {
   const device: Omit<Device, 'updated_at'> = {
     watchlist,
     notify_all_severe: body.notify_all_severe !== false,
+    notify_price_alerts: body.notify_price_alerts !== false,
     platform: typeof body.platform === 'string' ? body.platform.slice(0, 20) : 'android',
   };
   // KV ücretsiz planda günde 1000 yazma: değişmediyse yazma
@@ -250,6 +260,78 @@ async function runOnce(env: Env): Promise<State['last']> {
   return last;
 }
 
+// ------------------------------------------------------------------ gün içi fiyatlar
+
+interface PriceState {
+  alerted: Record<string, string>; // "gün|PİYASA:KOD|olay" -> gönderildiği zaman (aynı olay günde bir kez)
+  last?: { at: string; watched: number; quotes: number; fresh: number; events: number; sent: number; error?: string };
+}
+
+/** GET /api/quotes?s=BIST:THYAO,US:AAPL -> { quotes: { "BIST:THYAO": Quote, ... } } */
+async function quotesEndpoint(url: URL): Promise<Response> {
+  const keys = (url.searchParams.get('s') ?? '')
+    .split(',')
+    .map((k) => k.trim().toUpperCase())
+    .filter((k) => /^(BIST|US):[A-Z0-9.\-]{1,12}$/.test(k))
+    .slice(0, MAX_QUOTES);
+  const items = keys.map((key) => {
+    const [market, symbol] = key.split(':') as [Market, string];
+    return { key, market, yf: yahooSymbol(symbol, market) };
+  });
+  const quotes = await fetchQuotes(items);
+  return new Response(JSON.stringify({ quotes }), {
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=30' },
+  });
+}
+
+async function runPrices(env: Env): Promise<PriceState['last']> {
+  const devices = Object.entries(await listDevices(env)).filter(([, d]) => d.notify_price_alerts !== false);
+  const watched = new Set(devices.flatMap(([, d]) => d.watchlist.map((w) => `${w.market}:${w.symbol}`)));
+  if (!watched.size) return { at: new Date().toISOString(), watched: 0, quotes: 0, fresh: 0, events: 0, sent: 0 };
+
+  const levels = (await (await fetch(`${env.DATA_URL}/levels.json`)).json()) as Levels;
+  const items = [...watched]
+    .filter((k) => levels[k])
+    .slice(0, MAX_QUOTES)
+    .map((key) => ({ key, market: key.split(':')[0] as Market, yf: levels[key][0] }));
+  const quotes = await fetchQuotes(items);
+
+  const now = Date.now();
+  const fresh = Object.entries(quotes).filter(([, q]) => isFresh(q, now)); // piyasa kapalıysa eski fiyat: alarm yok
+  const events: PriceEvent[] = fresh.flatMap(([key, q]) => detectEvents(key, q, levels[key]));
+
+  const state = (await env.KV.get<PriceState>('price_state', 'json')) ?? { alerted: {} };
+  const today = new Date(now + 3 * 3600_000).toISOString().slice(0, 10); // İstanbul günü
+  for (const k of Object.keys(state.alerted)) if (!k.startsWith(today)) delete state.alerted[k];
+  const newEvents = events.filter((e) => !(`${today}|${e.key}|${e.kind}` in state.alerted));
+
+  const messages: PushMessage[] = [];
+  for (const [token, dev] of devices) {
+    const watch = new Set(dev.watchlist.map((w) => `${w.market}:${w.symbol}`));
+    for (const e of newEvents) {
+      if (!watch.has(e.key)) continue;
+      const { title, body } = eventText(e);
+      messages.push({
+        to: token, title, body, data: { symbol: e.symbol, market: e.market },
+        sound: 'default', priority: 'high', channelId: 'default',
+      });
+    }
+  }
+  const sent = messages.length ? await send(messages, env) : 0;
+  const last = {
+    at: new Date().toISOString(), watched: watched.size, quotes: Object.keys(quotes).length, fresh: fresh.length,
+    events: newEvents.length, sent, ...(messages.length > sent ? { error: `${messages.length - sent} bildirim gönderilemedi` } : {}),
+  };
+  for (const e of newEvents) state.alerted[`${today}|${e.key}|${e.kind}`] = last.at;
+  // KV ücretsiz planda günde 1000 yazma: sadece yeni olay olduğunda ya da saatte bir (durum özeti için) yaz
+  const prevAt = state.last ? Date.parse(state.last.at) : 0;
+  if (newEvents.length || now - prevAt > 3600_000) {
+    state.last = last;
+    await env.KV.put('price_state', JSON.stringify(state));
+  }
+  return last;
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
@@ -259,14 +341,31 @@ export default {
       });
     }
     if (url.pathname === '/api/devices' && req.method === 'POST') return registerDevice(req, env);
+    if (url.pathname === '/api/quotes') return quotesEndpoint(url);
     if (url.pathname === '/api/status') {
       const state = await env.KV.get<State>('state', 'json');
-      return json({ last: state?.last ?? null, seen: state ? Object.keys(state.seen).length : 0 });
+      const prices = await env.KV.get<PriceState>('price_state', 'json');
+      return json({
+        last: state?.last ?? null,
+        seen: state ? Object.keys(state.seen).length : 0,
+        prices: prices?.last ?? null,
+        alerts_today: prices ? Object.keys(prices.alerted).length : 0,
+      });
     }
     return json({ detail: 'Bulunamadı' }, 404);
   },
 
-  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === PRICE_CRON) {
+      ctx.waitUntil(
+        runPrices(env).catch(async (e: unknown) => {
+          const state = (await env.KV.get<PriceState>('price_state', 'json')) ?? { alerted: {} };
+          state.last = { ...(state.last ?? { watched: 0, quotes: 0, fresh: 0, events: 0, sent: 0 }), at: new Date().toISOString(), error: String(e) };
+          await env.KV.put('price_state', JSON.stringify(state));
+        }),
+      );
+      return;
+    }
     ctx.waitUntil(
       runOnce(env).catch(async (e: unknown) => {
         const state = (await env.KV.get<State>('state', 'json')) ?? { seen: {} };
