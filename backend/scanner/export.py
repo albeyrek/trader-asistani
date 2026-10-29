@@ -11,7 +11,9 @@ site/data/
   watch_meta.json               haber bekçisi (Cloudflare Worker) için hisse kodları, şirket adı anahtarları,
                                 sınıflandırma kuralları ve eşikler (tek kaynak: Python kodu)
   levels.json                   gün içi alarmlar için son kapanış, destek, direnç, stop seviyeleri
-  market.json                   piyasa rejimi: endeksler, genişlik ve geçmişi, rejim etiketi
+  market.json                   piyasa rejimi: endeksler, genişlik ve geçmişi, rejim etiketi, sektörler
+  scorecard.json                sinyal karnesi: geçmiş listelerin 5/10/20 gün sonraki fazla getirisi
+  signals_history.json          karnenin ham geçmişi (önbellek silinirse buradan devam edilir)
 """
 import argparse
 import json
@@ -21,7 +23,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import market, views
+from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
+from . import scorecard, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -90,7 +93,12 @@ def export(out: Path) -> None:
         },
     })
     # Piyasa rejimi: endeksler, genişlik, rejim etiketi (tüm fiyatlar gerekir: endeksler taranan hisselerde değil)
-    _write(data / "market.json", market.overview(all_prices, scan, side.sectors))
+    _write(data / "market.json", market_view.overview(all_prices, scan, side.sectors))
+    # Sinyal karnesi: bugünün listelerini kaydet, geçmiştekilerin sonraki getirisini ölç
+    history = scorecard.record(scorecard.load_history(), scan)
+    scorecard.save_history(history)
+    _write(data / "signals_history.json", history)
+    _write(data / "scorecard.json", scorecard.evaluate(history, all_prices, scan))
     # Gün içi fiyat alarmları için seviyeler: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]
     _write(data / "levels.json", views.levels_map(scan))
     # GitHub Pages'in Jekyll işlemesini kapat (alt çizgili dosyalar vb. sorun çıkarmasın)

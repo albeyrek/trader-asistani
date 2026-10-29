@@ -209,6 +209,28 @@ export interface MarketData {
 
 export type MarketOverview = Partial<Record<Market, MarketData>>;
 
+export interface HorizonStat {
+  n: number;
+  avg_excess: number | null; // piyasa medyanına göre ortalama fazla getiri (%)
+  hit: number | null; // isabet oranı (%): yükselişte medyanı geçen, düşüşte geride kalan
+}
+
+export interface ScorecardMarket {
+  snapshots: number;
+  first_date: string | null;
+  last_date: string | null;
+  up: Record<'h5' | 'h10' | 'h20', HorizonStat>;
+  down: Record<'h5' | 'h10' | 'h20', HorizonStat>;
+  recent: {
+    date: string;
+    days: number;
+    up: { symbol: string; ret: number; excess: number }[];
+    down: { symbol: string; ret: number; excess: number }[];
+  }[];
+}
+
+export type Scorecard = Partial<Record<Market, ScorecardMarket>>;
+
 export interface Meta {
   last_date: string;
   updated_at: string;

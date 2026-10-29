@@ -5,11 +5,12 @@ import { RefreshControl, ScrollView, StyleSheet, Text, View, type LayoutChangeEv
 import Svg, { Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { PriceChart } from '@/components/PriceChart';
+import { ScorecardCard } from '@/components/ScorecardCard';
 import { Card, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
 import { regimeColors, scoreColors, useTheme } from '@/lib/theme';
-import type { Market, MarketData, MarketOverview, Outlook, SectorRow } from '@/lib/types';
+import type { Market, MarketData, MarketOverview, Outlook, Scorecard, SectorRow } from '@/lib/types';
 
 const OUTLOOKS: Outlook[] = ['Güçlü Yükseliş', 'Yükseliş', 'Nötr', 'Düşüş', 'Güçlü Düşüş'];
 
@@ -17,6 +18,7 @@ export default function MarketScreen() {
   const t = useTheme();
   const [market, setMarket] = useState<Market>('BIST');
   const { data, error, loading, reload } = useApi<MarketOverview>('/api/market');
+  const score = useApi<Scorecard>('/api/scorecard');
   const m = data?.[market];
 
   return (
@@ -30,6 +32,7 @@ export default function MarketScreen() {
       ) : (
         <MarketBody m={m} market={market} />
       )}
+      {score.data || score.error ? <ScorecardCard sc={score.data?.[market]} market={market} /> : null}
       <Text style={[styles.note, { color: t.muted, textAlign: 'center' }]}>
         Rejim, endeks trendi ve piyasa genişliğinden otomatik hesaplanır; yatırım tavsiyesi değildir.
       </Text>
