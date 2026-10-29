@@ -1,0 +1,7 @@
+yfinance>=1.7
+pandas>=3.1
+requests
+lxml
+pyarrow
+fastapi
+uvicorn[standard]

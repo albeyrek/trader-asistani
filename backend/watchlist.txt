@@ -1,0 +1,8 @@
+# İzleme listesi: buradaki hisselerin haberleri her gün mutlaka analiz edilir.
+# Her satıra bir ya da birden çok hisse kodu yazabilirsin (BIST için .IS eklemeden). # sonrası açıklamadır.
+
+# BIST
+THYAO ASELS GARAN AKBNK YKBNK ISCTR BIMAS EREGL KCHOL SAHOL SISE TUPRS FROTO TOASO TCELL PGSUS
+
+# ABD
+AAPL MSFT NVDA AMZN GOOGL META TSLA AVGO JPM BRK.B

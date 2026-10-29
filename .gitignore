@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+node_modules/
+
+# Üretilen veri ve çıktılar (bulutta GitHub Actions önbelleğinde / Pages'te)
+backend/data/
+site/
+
+# Yerel yardımcı dosyalar
+*_qr.png
+/.claude/
+
+# Bu projeyle ilgisi olmayan klasörler
+matlab_gui/

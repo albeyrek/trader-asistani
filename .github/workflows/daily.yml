@@ -1,0 +1,78 @@
+# Günlük tarama: veri -> teknik tarama -> haber/KAP analizi -> GitHub Pages'te statik JSON
+# Saatler UTC'dir. Türkiye UTC+3:
+#   15:45 UTC = 18:45 TR  -> BIST kapanışı sonrası (sadece BIST; ABD o saatte açık)
+#   22:15 UTC = 01:15 TR  -> ABD kapanışı sonrası (iki piyasa)
+# GitHub zamanlanmış görevleri yoğunlukta birkaç dakika ile yarım saat arası gecikebilir.
+name: Gunluk tarama
+
+on:
+  schedule:
+    - cron: "45 15 * * 1-5"
+    - cron: "15 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      market:
+        description: "Piyasa (bos = ikisi)"
+        required: false
+        default: ""
+        type: choice
+        options: ["", "BIST", "US"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      # Fiyat geçmişi ve önceki sonuçlar: her çalıştırma yeni bir önbellek kaydeder, sonraki en yenisini geri yükler
+      - name: Onceki veriyi geri yukle
+        uses: actions/cache@v4
+        with:
+          path: backend/data
+          key: data-${{ github.run_id }}
+          restore-keys: data-
+
+      - name: Piyasa sec
+        id: market
+        run: |
+          if [ -n "${{ inputs.market }}" ]; then echo "args=--market ${{ inputs.market }}" >> "$GITHUB_OUTPUT";
+          elif [ "${{ github.event.schedule }}" = "45 15 * * 1-5" ]; then echo "args=--market BIST" >> "$GITHUB_OUTPUT";
+          else echo "args=" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Tarama
+        run: python -m scanner.daily ${{ steps.market.outputs.args }} --export ../site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: scan
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
