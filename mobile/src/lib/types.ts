@@ -20,6 +20,20 @@ export interface StockSummary {
   at_new_high: boolean;
   at_new_low: boolean;
   alerts: string[];
+  earnings_date?: string | null;
+  earnings_status?: EarningsStatus | null;
+}
+
+export type EarningsStatus = 'expected' | 'estimated' | 'reported';
+
+export interface EarningsEvent {
+  date: string;
+  status: EarningsStatus;
+  source: string;
+  time?: string | null;
+  eps_forecast?: string | null;
+  period?: string | null;
+  last_year?: string;
 }
 
 export interface RiskFlag {
@@ -104,6 +118,7 @@ export interface StockDetail extends StockSummary {
   circuit_breakers: number | null;
   chart_daily: Bar[];
   chart_weekly: Bar[];
+  event?: EarningsEvent | null;
   // Grafik asistanı (eski veride olmayabilir)
   levels_daily?: LevelSet;
   levels_weekly?: LevelSet;

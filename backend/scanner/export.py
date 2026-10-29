@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from . import market, views
+from . import events, market, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -48,7 +48,8 @@ def export(out: Path) -> None:
     data = out / "data"
     if data.exists():
         shutil.rmtree(data)
-    scan = pd.read_parquet(RESULTS_FILE)
+    events_map = events.load()
+    scan = views.enrich(pd.read_parquet(RESULTS_FILE), events_map)
     news = pd.read_parquet(ITEMS_FILE) if ITEMS_FILE.exists() else None
     updated = pd.Timestamp(RESULTS_FILE.stat().st_mtime, unit="s", tz="UTC")
 
@@ -70,7 +71,8 @@ def export(out: Path) -> None:
         if sym not in daily:
             continue
         detail = views.stock_detail(r, daily[sym], weekly.get(sym, daily[sym].iloc[:0]),
-                                    news_by.get((r["market"], r["symbol"])))
+                                    news_by.get((r["market"], r["symbol"])),
+                                    events_map.get(f"{r['market']}:{r['symbol']}"))
         _write(data / "stock" / r["market"] / f"{r['symbol']}.json", detail)
         if i % 1000 == 0:
             print(f"  {i}/{len(scan)} hisse detayı")

@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from scanner import market, views
+from scanner import events, market, views
 from scanner.config import DATA_DIR
 from scanner.devices import upsert_device
 from scanner.prices import PRICE_FILE, to_weekly
@@ -26,7 +26,8 @@ _cache: dict[str, tuple[float, pd.DataFrame]] = {}
 
 
 def _load(path: Path) -> pd.DataFrame:
-    """Parquet dosyasını bellekte tutar; dosya değişince (günlük çalıştırma sonrası) yeniden okur."""
+    """Parquet dosyasını bellekte tutar; dosya değişince (günlük çalıştırma sonrası) yeniden okur.
+    Tarama tablosu, bulut dışa aktarımıyla aynı yan verilerle (bilanço takvimi vb.) zenginleştirilir."""
     if not path.exists():
         raise HTTPException(503, f"{path.name} bulunamadı. Önce 'python -m scanner.daily' çalıştırın.")
     mtime = path.stat().st_mtime
@@ -34,6 +35,8 @@ def _load(path: Path) -> pd.DataFrame:
     if hit and hit[0] == mtime:
         return hit[1]
     df = pd.read_parquet(path)
+    if path == SCAN_FILE:
+        df = views.enrich(df, events.load())
     _cache[str(path)] = (mtime, df)
     return df
 
@@ -124,4 +127,4 @@ def stock(symbol: str, market: str | None = None):
     if NEWS_FILE.exists():
         n = _load(NEWS_FILE)
         news = n[(n["symbol"] == r["symbol"]) & (n["market"] == r["market"])]
-    return views.stock_detail(r, sp, to_weekly(sp), news)
+    return views.stock_detail(r, sp, to_weekly(sp), news, events.load().get(f"{r['market']}:{r['symbol']}"))

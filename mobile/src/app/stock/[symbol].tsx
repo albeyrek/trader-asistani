@@ -12,7 +12,7 @@ import * as f from '@/lib/format';
 import { quoteKey, useQuotes } from '@/lib/quotes';
 import { useSettings } from '@/lib/settings';
 import { scoreColors, useTheme } from '@/lib/theme';
-import type { Market, NewsItem, PerformanceKey, PriceLevel, StockDetail } from '@/lib/types';
+import type { EarningsEvent, Market, NewsItem, PerformanceKey, PriceLevel, StockDetail } from '@/lib/types';
 
 type Tf = 'daily' | 'weekly';
 type Range = '1A' | '3A' | '6A' | '1Y' | '2Y';
@@ -90,6 +90,7 @@ export default function StockScreen() {
           <Text style={[styles.sub, { color: t.muted }]}>
             {f.marketLabel(s.market)}{s.sector ? ` · ${s.sector}` : ''} · {f.date(s.date)}
           </Text>
+          {s.event ? <EarningsLine ev={s.event} /> : null}
         </View>
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={[styles.price, { color: t.text }]}>{f.price(livePrice, s.market)}</Text>
@@ -311,6 +312,23 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
   );
 }
 
+function EarningsLine({ ev }: { ev: EarningsEvent }) {
+  const t = useTheme();
+  const badge = f.earningsBadge(ev.date, ev.status);
+  const when = new Date(`${ev.date}T00:00:00`).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long' });
+  const text = badge?.text
+    ?? (ev.status === 'reported' ? `Son bilanço: ${when}` : `Bilanço: ${when}${ev.status === 'estimated' ? ' (tahmini)' : ''}`);
+  const extra = [ev.time, ev.eps_forecast ? `beklenti EPS ${ev.eps_forecast}` : null].filter(Boolean).join(' · ');
+  return (
+    <View style={styles.earnRow}>
+      <Ionicons name="calendar-outline" size={13} color={badge?.soon ? t.warn : t.muted} />
+      <Text style={[styles.sub, { color: badge?.soon ? t.warn : t.muted, marginTop: 0, fontWeight: badge?.soon ? '700' : '400' }]}>
+        {text}{extra ? ` · ${extra}` : ''}
+      </Text>
+    </View>
+  );
+}
+
 function LevelRow({ label, level, market, color }: { label: string; level: PriceLevel; market: Market; color: string }) {
   const t = useTheme();
   return (
@@ -429,6 +447,7 @@ const styles = StyleSheet.create({
   newsTitle: { fontSize: 13, lineHeight: 18 },
   newsMeta: { fontSize: 11, marginTop: 3 },
   disclaimer: { fontSize: 11, textAlign: 'center', marginTop: 8, lineHeight: 16 },
+  earnRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
   perfRow: {
     flexDirection: 'row', borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 10, marginBottom: 12,
   },

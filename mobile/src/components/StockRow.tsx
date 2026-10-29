@@ -17,6 +17,7 @@ function StockRowBase({ item, quote, onRemove }: { item: StockSummary; quote?: Q
   const changeColor = change > 0 ? t.up : change < 0 ? t.down : t.muted;
   const outlook = scoreColors(t, item.combined_score);
   const risk = levelColors(t, item.overall_risk);
+  const earnings = f.earningsBadge(item.earnings_date, item.earnings_status);
 
   return (
     <Pressable
@@ -33,6 +34,7 @@ function StockRowBase({ item, quote, onRemove }: { item: StockSummary; quote?: Q
         <View style={styles.chips}>
           <Chip label={item.outlook} fg={outlook.fg} bg={outlook.bg} />
           <Chip label={`Risk: ${item.overall_risk}`} fg={risk.fg} bg={risk.bg} />
+          {earnings ? <Chip label={earnings.text} fg={earnings.soon ? t.warn : t.muted} bg={earnings.soon ? t.warnBg : t.neutralBg} /> : null}
         </View>
       </View>
       <View style={styles.right}>

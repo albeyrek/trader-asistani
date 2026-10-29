@@ -52,6 +52,21 @@ export function quoteTime(q: { time: string; delayed: boolean }): string {
   return q.delayed ? `${when} · 15 dk gecikmeli` : `${when} · anlık`;
 }
 
+/** Bilanço rozeti: yaklaşan (14 gün içinde) ya da son 7 günde açıklanmış bilanço; yoksa null. */
+export function earningsBadge(dateIso: string | null | undefined, status: string | null | undefined):
+  { text: string; soon: boolean } | null {
+  if (!dateIso || !status) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(`${dateIso}T00:00:00`);
+  const days = Math.round((d.getTime() - today.getTime()) / 86400000);
+  const when = d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+  if (status === 'reported') return days >= -7 ? { text: `Bilanço açıklandı (${when})`, soon: false } : null;
+  if (days < 0 || days > 14) return null;
+  const rel = days === 0 ? 'bugün' : days === 1 ? 'yarın' : `${days} gün`;
+  return { text: `Bilanço ${rel} · ${when}${status === 'estimated' ? ' (tahmini)' : ''}`, soon: true };
+}
+
 export function marketLabel(m: Market): string {
   return m === 'US' ? 'ABD' : 'BIST';
 }

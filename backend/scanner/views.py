@@ -6,14 +6,14 @@ import re
 
 import pandas as pd
 
-from . import levels
+from . import events, levels
 from .indicators import ema
 
 JSON_COLUMNS = ("daily_reasons", "weekly_reasons", "risk_flags", "top_news", "alerts")
 LIST_FIELDS = [
     "symbol", "market", "name", "sector", "close", "change_pct", "combined_score", "daily_score",
     "weekly_score", "outlook", "overall_risk", "volatility", "news_score", "news_risk", "at_new_high",
-    "at_new_low", "alerts",
+    "at_new_low", "alerts", "earnings_date", "earnings_status",
 ]
 # Backtest sonuçlarına göre teknik skorun güvenilirliği (bkz. data/backtest_report.txt)
 MODEL_RELIABILITY = {
@@ -64,6 +64,15 @@ def meta(scan: pd.DataFrame, updated_at: pd.Timestamp) -> dict:
     }
 
 
+def enrich(scan: pd.DataFrame, events_map: dict[str, dict]) -> pd.DataFrame:
+    """Tarama tablosuna yan verileri ekler (bilanço takvimi; ileride göreli güç, temel veriler)."""
+    out = scan.copy()
+    keys = out["market"] + ":" + out["symbol"]
+    out["earnings_date"] = [events_map.get(k, {}).get("date") for k in keys]
+    out["earnings_status"] = [events_map.get(k, {}).get("status") for k in keys]
+    return out
+
+
 def levels_map(scan: pd.DataFrame) -> dict:
     """Gün içi alarmlar ve portföy için: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]."""
     return {f"{r.market}:{r.symbol}": [r.yf_symbol, *(clean(v) for v in (r.close, r.support, r.resistance, r.stop))]
@@ -90,8 +99,10 @@ def news_list(news: pd.DataFrame) -> list[dict]:
     } for x in n.itertuples()]
 
 
-def stock_detail(r: pd.Series, daily: pd.DataFrame, weekly: pd.DataFrame, news: pd.DataFrame | None) -> dict:
+def stock_detail(r: pd.Series, daily: pd.DataFrame, weekly: pd.DataFrame, news: pd.DataFrame | None,
+                 event: dict | None = None) -> dict:
     detail = row(r)
+    detail["event"] = event
     detail["chart_daily"] = chart(daily, (20, 50, 200), DAILY_BARS)
     detail["chart_weekly"] = chart(weekly, (10, 30, 50), WEEKLY_BARS)
     # Grafik asistanı: çoklu destek/direnç, trend çizgileri, dönem getirileri, yorumlar
@@ -103,6 +114,9 @@ def stock_detail(r: pd.Series, daily: pd.DataFrame, weekly: pd.DataFrame, news: 
     detail["performance"] = perf
     detail["insights"] = levels.insights(lv_daily, lv_weekly, perf, float(r["close"]),
                                          float(r["high_52w"]), float(r["low_52w"]))
+    note = events.event_note(event)
+    if note:
+        detail["insights"].insert(0, note)
     detail["news"] = news_list(news) if news is not None and len(news) else []
     detail["reliability"] = MODEL_RELIABILITY.get(r["market"])
     return detail
