@@ -55,7 +55,7 @@ export interface AssistantMarket {
   regime: { label: string; score: number; summary: string };
   risk_scale: number;
   stance: string;
-  form?: { recent_r: number; recent_n: number } | null; // asistanın planlarının son 8 haftalık sonucu
+  form?: { recent_r: number; recent_n: number; effective?: boolean } | null; // planların son 8 haftalık sonucu
   candidates: Candidate[];
 }
 
@@ -138,7 +138,9 @@ export function buildPrompt(c: Candidate, mk: AssistantMarket): { role: 'system'
     `Piyasa rejimi: ${mk.regime.label}. ${mk.regime.summary}`,
     mk.form
       ? `Strateji formu: asistanın bu tür planları son 8 haftada (geçmiş veride, ${mk.form.recent_n} kurulum) ortalama ` +
-        `${rText(mk.form.recent_r)} ${mk.form.recent_r > 0 ? 'kazandırdı' : 'kaybettirdi; asistan temkin modunda (liste kısaltıldı, pozisyon yarıya indirildi)'}`
+        `${rText(mk.form.recent_r)} ${mk.form.recent_r > 0 ? 'kazandırdı'
+          : mk.form.effective === false ? 'kaybettirdi (bu piyasada geçmişte sonraki haftalar için belirgin bir işaret değildi)'
+            : 'kaybettirdi; asistan temkin modunda (liste kısaltıldı, pozisyon yarıya indirildi)'}`
       : '',
     `İşlem planı: giriş aralığı ${fmt(c.entry_low)}–${p(c.entry_high)}; stop ${p(c.stop)} (girişe göre risk ${pct(c.risk_pct)}); ` +
       `1. hedef ${p(c.target1)}; 2. hedef ${p(c.target2)}; ödül/risk ${c.rr.toFixed(1).replace('.', ',')}` +

@@ -249,8 +249,14 @@ def form_note(form: dict) -> str:
 def stance(regime: dict, n: int, market: str, model_rejected: int = 0, form: dict | None = None) -> str:
     """Piyasa geneli için tek cümlelik duruş."""
     if form and form["recent_r"] <= 0:
-        return ("Temkin modu: " + form_note(form) + " Bu tür dönemlerde sonraki haftalar da geçmişte genellikle zayıf "
-                "geçti; liste kısaltıldı ve önerilen pozisyon yarıya indirildi. " + _stance(regime, n, market, model_rejected))
+        t = form["test"]
+        if form["effective"]:
+            return (f"Temkin modu: {form_note(form)} 10 yıllık testte form kötüyken sonraki hafta ortalama "
+                    f"{_r(t['bad_next_r'])}, iyiyken {_r(t['good_next_r'])} oldu; bu yüzden liste kısaltıldı ve önerilen "
+                    "pozisyon yarıya indirildi. " + _stance(regime, n, market, model_rejected))
+        return (f"{form_note(form)} Ancak bu piyasada 10 yıllık testte form, sonraki haftalar için belirgin bir işaret "
+                f"olmadı (form kötüyken {_r(t['bad_next_r'])}, iyiyken {_r(t['good_next_r'])}); liste bu yüzden "
+                "kısaltılmadı. " + _stance(regime, n, market, model_rejected))
     return _stance(regime, n, market, model_rejected)
 
 
@@ -287,7 +293,7 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         limit, scale = REGIME_LIMITS[regime["label"]]
         # Strateji formu: planlar son haftalarda zarar ettirdiyse liste kısalır, pozisyon küçülür
         form = scorer.form(market)
-        if form and form["recent_r"] <= 0:
+        if form and form["recent_r"] <= 0 and form["effective"]:
             limit, scale = min(limit, learn.FORM_LIMIT), scale * learn.FORM_SCALE
         pre = prefilter(g)
         pre = pre[[events.days_until(side.events.get(f"{market}:{s}")) is None
@@ -357,7 +363,8 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             "regime": regime,
             "risk_scale": scale,
             "stance": stance(regime, len(picked), market, rejected, form),
-            "form": {k: form[k] for k in ("recent_r", "recent_n", "recent_win", "long_r", "long_n")} if form else None,
+            "form": {k: form[k] for k in ("recent_r", "recent_n", "recent_win", "long_r", "long_n", "effective")}
+            if form else None,
             "ranking": "model" if scorer.reliable else "rules",
             "screened": int(len(g)), "passed_filter": int(len(pre)), "with_plan": len(rows),
             "candidates": picked,

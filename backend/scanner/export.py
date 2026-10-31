@@ -16,6 +16,7 @@ site/data/
   assistant_score.json          asistan karnesi: geçmiş adaylar plana uyulsaydı sonuç (R)
   assistant_history.json        karnenin ham geçmişi
   model.json                    öğrenen model: eğitim tarihi, ileriye dönük test sonuçları, öğrenilenler
+  timemachine/{yıl}.json        zaman makinesi: geçmiş her haftada asistanın seçimleri ve sonrasında olanlar
   scorecard.json                sinyal karnesi: geçmiş listelerin 5/10/20 gün sonraki fazla getirisi
   signals_history.json          karnenin ham geçmişi (önbellek silinirse buradan devam edilir)
 """
@@ -110,6 +111,12 @@ def export(out: Path) -> None:
     # Öğrenen model: nasıl öğrendiği, test sonuçları, neye baktığı (haftalık eğitim: scanner/learn.py)
     if learn.META_FILE.exists():
         _write(data / "model.json", json.loads(learn.META_FILE.read_text(encoding="utf-8")))
+    # Zaman makinesi: geçmiş haftalarda asistanın seçimleri ve sonuçları (yıl başına bir dosya)
+    if learn.TIMEMACHINE_FILE.exists():
+        tm = json.loads(learn.TIMEMACHINE_FILE.read_text(encoding="utf-8"))
+        for year, markets in tm.items():
+            _write(data / "timemachine" / f"{year}.json", markets)
+        _write(data / "timemachine" / "index.json", {"years": sorted(tm)})
     # Sinyal karnesi: bugünün listelerini kaydet, geçmiştekilerin sonraki getirisini ölç
     history = scorecard.record(scorecard.load_history(), scan)
     scorecard.save_history(history)

@@ -20,7 +20,7 @@ concurrency:
 jobs:
   learn:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     defaults:
       run:
         working-directory: backend
@@ -43,11 +43,19 @@ jobs:
           key: data-${{ github.run_id }}
           restore-keys: data-
 
+      # ~10 yıllık geçmiş her hafta baştan indirilir (geriye dönük bölünme/temettü düzeltmeleri güncel olsun)
+      - name: Uzun fiyat gecmisi
+        run: python -m scanner.history
+
       - name: Ogrenme
         run: python -m scanner.learn
 
       - name: Disa aktarma
         run: python -m scanner.export --out ../site
+
+      # Uzun geçmiş önbelleğe girmesin (her hafta yeniden indiriliyor; günlük tarama 2 yıllık dosyayı kullanır)
+      - name: Temizlik
+        run: rm -f data/prices_long.parquet
 
       - uses: actions/upload-pages-artifact@v3
         with:

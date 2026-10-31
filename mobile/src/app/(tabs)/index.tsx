@@ -1,3 +1,4 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -49,6 +50,19 @@ export default function AssistantScreen() {
             <CandidateCard key={c.symbol} c={c} quote={quotes[quoteKey(c.symbol, c.market)]} riskScale={mk.risk_scale} />
           ))}
           <RadarCard mk={mk} />
+          <Pressable
+            onPress={() => router.push('/timemachine')}
+            style={[styles.tmLink, { backgroundColor: t.card, borderColor: t.border }]}
+            accessibilityRole="button">
+            <Ionicons name="time-outline" size={22} color={t.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.rowTitle, { color: t.text }]}>Zaman makinesi</Text>
+              <Text style={[styles.small, { color: t.muted }]}>
+                Geçmişte bir hafta seç: asistan o gün ne derdi, sonra ne oldu? Yıl yıl test sonuçları.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={t.muted} />
+          </Pressable>
           <PortfolioCheck market={market} mk={mk} />
           <ScoreCard sc={score.data?.[market]} />
           <ModelCard meta={model.data} market={market} />
@@ -73,7 +87,7 @@ function StanceCard({ mk, market }: { mk: AssistantMarket; market: Market }) {
       {mk.form ? (
         <View style={{ marginBottom: 8 }}>
           <Chip
-            label={`Strateji formu (8 hafta): ${rText(mk.form.recent_r)}${mk.form.recent_r <= 0 ? ' · temkin modu' : ''}`}
+            label={`Strateji formu (8 hafta): ${rText(mk.form.recent_r)}${mk.form.recent_r <= 0 && mk.form.effective !== false ? ' · temkin modu' : ''}`}
             fg={mk.form.recent_r > 0 ? t.up : t.down}
             bg={mk.form.recent_r > 0 ? t.upBg : t.downBg}
           />
@@ -238,4 +252,8 @@ const styles = StyleSheet.create({
   trade: { flexDirection: 'row', gap: 10, paddingVertical: 5, borderTopWidth: StyleSheet.hairlineWidth },
   tradeR: { width: 56, textAlign: 'right', fontVariant: ['tabular-nums'] },
   disclaimer: { fontSize: 11, textAlign: 'center', lineHeight: 16, marginTop: 4 },
+  tmLink: {
+    flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth,
+    padding: 14, marginBottom: 12,
+  },
 });

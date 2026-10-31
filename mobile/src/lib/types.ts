@@ -305,7 +305,8 @@ export interface AssistantMarket {
   radar: RadarItem[];
   ranking?: 'model' | 'rules'; // sıralamayı öğrenen model mi, kurallar mı yaptı
   /** Strateji formu: asistanın planları son 8 haftada (geçmiş veride) ne kazandırdı; negatifse temkin modu */
-  form?: { recent_r: number; recent_n: number; recent_win: number | null; long_r: number; long_n: number } | null;
+  form?: { recent_r: number; recent_n: number; recent_win: number | null; long_r: number; long_n: number;
+    effective?: boolean } | null;
 }
 
 export interface AssistantData {
@@ -363,6 +364,12 @@ export interface ModelMeta {
     reg: {
       ic: number;
       ic_t: number;
+      edge?: number | null; // haftalık "ilk 5" farkı: model - kurallar (R)
+      edge_t?: number | null; // farkın anlamlılığı (t)
+      weeks?: number;
+      wk_model_r?: number;
+      wk_rule_r?: number;
+      wk_all_r?: number;
       model_top_r: number | null;
       rule_top_r: number | null;
       all_r: number;
@@ -386,7 +393,55 @@ export interface ModelMeta {
     long_n: number;
     weekly: { w: string; r: number; n: number }[];
   }>>;
+  yearly?: YearRow[];
+  form_test?: Partial<Record<Market, { weeks: number; good_weeks: number; bad_weeks: number;
+    good_next_r: number | null; bad_next_r: number | null }>>;
+  oos_period?: { from: string; to: string; n: number; folds: number };
   history: { trained_at: string; n: number; auc: number; ic: number; model_top_r: number | null;
     rule_top_r: number | null; all_r: number; reliable: boolean; decision: string }[];
   last_decision: string;
+}
+
+// ------------------------------------------------------------------ zaman makinesi
+
+/** Geçmişte bir haftada seçilen kurulum ve sonrasında olan (backend/scanner/learn.py timemachine). */
+export interface TmPick {
+  s: string; // hisse kodu
+  setup: SetupKind;
+  close: number;
+  el: number; // giriş aralığı alt
+  eh: number; // giriş aralığı üst
+  stop: number;
+  t1: number;
+  rr: number;
+  rs: number;
+  p: number; // o günkü modelin hedefe ulaşma olasılığı (o tarihten önceki veriyle eğitilmiş)
+  pred: number; // o günkü modelin beklenen getiri tahmini (R)
+  status: TradeStatus;
+  r: number;
+  days: number;
+  ret20: number | null; // 20 işlem günü sonraki fiyat değişimi (%)
+}
+
+export interface TmWeek {
+  date: string;
+  n: number; // o hafta plan çıkan kurulum sayısı
+  all_r: number;
+  win: number;
+  rule: TmPick[]; // asistanın (kurallar) ilk 5'i
+  model: TmPick[]; // modelin ilk 5'i
+}
+
+export type TmYear = Partial<Record<Market, TmWeek[]>>;
+
+export interface YearRow {
+  market: Market;
+  year: number;
+  n: number;
+  weeks: number;
+  win: number;
+  all_r: number;
+  rule_top_r: number | null;
+  model_top_r: number | null;
+  auc: number | null;
 }

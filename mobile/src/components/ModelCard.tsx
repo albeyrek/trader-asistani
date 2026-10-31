@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -27,6 +28,7 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
   const form = meta.form[market];
   const mk = meta.by_market[market];
   const offset = meta.clf_offset[market];
+  const ft = meta.form_test?.[market];
 
   return (
     <Card
@@ -39,9 +41,10 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
         />
       }>
       <Text style={[styles.text, { color: t.text }]}>
-        Her hafta asistanın planları geçmiş {f.num(meta.n_samples, 0)} kurulumda yeniden oynatılıyor ({f.date(meta.period.from)} –{' '}
-        {f.date(meta.period.to)}): önce hedef mi geldi, stop mu, kaç R kazandırdı? Model bundan öğreniyor; her yeni sürüm
-        hiç görmediği haftalarda test ediliyor ve ancak testi geçerse karar veriyor. Son eğitim: {f.date(meta.trained_at)}.
+        Her hafta asistanın planları geçmiş {f.num(meta.n_samples, 0)} kurulumda yeniden oynatılıyor ({ymd(meta.period.from)} –{' '}
+        {ymd(meta.period.to)}): önce hedef mi geldi, stop mu, kaç R kazandırdı? Model bundan öğreniyor; her 6 aylık dönem, o
+        dönemden önceki veriyle eğitilen modelle tahmin edilerek test ediliyor ve model ancak testi geçerse karar veriyor.
+        Son eğitim: {f.date(meta.trained_at)}.
       </Text>
 
       {form && form.recent_r != null ? (
@@ -52,9 +55,13 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
           <Text style={[styles.small, { color: t.text }]}>
             Sonuçlanan {f.num(form.recent_n, 0)} kurulumda hedefe ulaşma %{f.num(form.recent_win, 0)}; uzun dönem ortalaması{' '}
             {rText(form.long_r)}.{' '}
-            {form.recent_r > 0
-              ? 'Planlar şu an çalışıyor.'
-              : 'Planlar şu an çalışmıyor: geçmişte bu tür dönemlerin ardından gelen haftalar da genellikle zayıf geçti. Asistan temkin modunda (daha az aday, yarım pozisyon).'}
+            {form.recent_r > 0 ? 'Planlar şu an çalışıyor.' : 'Planlar şu an çalışmıyor.'}
+            {ft && ft.good_next_r != null && ft.bad_next_r != null
+              ? ` 10 yıllık testte form kötüyken sonraki hafta ortalama ${rText(ft.bad_next_r)}, iyiyken ${rText(ft.good_next_r)}.` +
+                (ft.good_next_r - ft.bad_next_r >= 0.05
+                  ? (form.recent_r <= 0 ? ' Fark anlamlı olduğu için asistan temkin modunda (daha az aday, yarım pozisyon).' : '')
+                  : ' Bu piyasada fark küçük; form sadece bilgi olarak gösteriliyor.')
+              : ''}
           </Text>
           <View style={styles.spark}>
             {form.weekly.map((w) => {
@@ -73,20 +80,27 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
         </View>
       ) : null}
 
-      <Text style={[styles.section, { color: t.text }]}>Son test (modelin görmediği {f.date(reg.test_from)} – {f.date(reg.test_to)})</Text>
+      <Text style={[styles.section, { color: t.text }]}>Geçmiş test (modelin görmediği {ymd(reg.test_from)} – {ymd(reg.test_to)})</Text>
       <View style={styles.stats}>
         <Stat label="Olasılık isabeti (AUC)" value={f.num(clf.auc, 2)} sub="0,50 = yazı-tura" color={clf.auc >= 0.55 ? t.up : t.warn} />
-        <Stat label="Modelin ilk 5'i" value={rText(reg.model_top_r)} sub={`kurallar: ${rText(reg.rule_top_r)}`}
-          color={(reg.model_top_r ?? 0) > 0 ? t.up : t.down} />
-        <Stat label="Tüm kurulumlar" value={rText(reg.all_r)} sub={`${f.num(reg.n_test, 0)} kurulum`}
-          color={reg.all_r > 0 ? t.up : t.down} />
+        <Stat label="Haftalık ilk 5: model" value={rText(reg.wk_model_r ?? reg.model_top_r)}
+          sub={`kurallar: ${rText(reg.wk_rule_r ?? reg.rule_top_r)}`} color={(reg.wk_model_r ?? 0) > 0 ? t.up : t.down} />
+        <Stat label="Tüm kurulumlar" value={rText(reg.wk_all_r ?? reg.all_r)} sub={`${f.num(reg.n_test, 0)} kurulum`}
+          color={(reg.wk_all_r ?? reg.all_r) > 0 ? t.up : t.down} />
       </View>
       <Text style={[styles.small, { color: t.muted, marginTop: 6 }]}>
-        Hedefe ulaşma olasılığını tahmin etmekte model yazı-turadan iyi (AUC {f.num(clf.auc, 2)}). Ama “hangi hisse daha
-        çok kazandırır” sıralamasında henüz {reg.ic > 0.02 ? 'zayıf bir başarı var' : 'rastgeleden iyi değil'} (sıra korelasyonu{' '}
-        {f.num(reg.ic, 3)}). {meta.reliable
-          ? 'Testi geçtiği için adayları model sıralıyor.'
-          : 'Bu yüzden adayları kurallar sıralıyor; model olasılığı sadece bilgi olarak gösteriliyor. Her hafta yeniden denenir.'}
+        Hedefe ulaşma olasılığını tahmin etmekte model yazı-turadan iyi (AUC {f.num(clf.auc, 2)}).
+        {reg.edge != null && reg.edge_t != null
+          ? ` Her hafta seçilen ilk 5'te model kurallardan ortalama ${rText(reg.edge)} ${reg.edge >= 0 ? 'iyi' : 'kötü'}; ` +
+            (reg.edge_t >= 2
+              ? `bu fark ${reg.weeks} haftalık testte anlamlı (t=${f.num(reg.edge_t, 1)}).`
+              : `ama ${reg.weeks} haftalık testte bu fark şans eseri olabilecek kadar küçük (t=${f.num(reg.edge_t, 1)}; en az 2 gerekiyor).`)
+          : ''}
+        {meta.reliable
+          ? ' Testi geçtiği için adayları model sıralıyor.'
+          : ' Bu yüzden adayları kurallar sıralıyor; model olasılığı bilgi olarak gösteriliyor. Her hafta yeniden denenir.'}
+        {' '}Asıl kazanç planın kendisinden geliyor: tüm kurulumların ortalaması {rText(reg.wk_all_r ?? reg.all_r)} (işlem
+        maliyetleri hariç; bugün borsada olmayan hisseler veride yok).
         {offset != null && Math.abs(offset) > 0.1
           ? ` Son dönemde model ${offset < 0 ? 'fazla iyimserdi' : 'fazla kötümserdi'}; olasılıklar buna göre otomatik düzeltildi.`
           : ''}
@@ -105,6 +119,10 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
         </>
       ) : null}
 
+      <Pressable onPress={() => router.push('/timemachine')} style={[styles.tmButton, { borderColor: t.accent }]} accessibilityRole="button">
+        <Ionicons name="time-outline" size={16} color={t.accent} />
+        <Text style={{ color: t.accent, fontWeight: '700', fontSize: 13 }}>Zaman makinesi: yıl yıl geçmiş test</Text>
+      </Pressable>
       <Pressable onPress={() => setOpen((o) => !o)} style={styles.more} accessibilityRole="button">
         <Text style={{ color: t.accent, fontWeight: '600', fontSize: 13 }}>{open ? 'Ayrıntıları gizle' : 'Olasılık doğruluğu ve eğitim geçmişi'}</Text>
         <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={t.accent} />
@@ -140,6 +158,11 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
   );
 }
 
+function ymd(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' });
+}
+
 function Stat({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   const t = useTheme();
   return (
@@ -166,5 +189,9 @@ const styles = StyleSheet.create({
   bar: { borderRadius: 1 },
   insight: { flexDirection: 'row', gap: 6, alignItems: 'flex-start', marginTop: 3 },
   more: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10, marginBottom: 4 },
+  tmButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderRadius: 10,
+    paddingVertical: 9, marginTop: 12,
+  },
   row: { flexDirection: 'row', gap: 8, paddingVertical: 4, borderTopWidth: StyleSheet.hairlineWidth },
 });

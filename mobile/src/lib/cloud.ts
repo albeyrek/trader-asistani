@@ -47,6 +47,8 @@ export async function cloudGet<T>(path: string, signal?: AbortSignal): Promise<T
   if (url.pathname === '/api/scorecard') return get<T>('scorecard.json', signal);
   if (url.pathname === '/api/assistant/score') return get<T>('assistant_score.json', signal);
   if (url.pathname === '/api/model') return get<T>('model.json', signal);
+  const tm = /^\/api\/timemachine\/(\w+)$/.exec(url.pathname);
+  if (tm) return get<T>(`timemachine/${tm[1]}.json`, signal);
   if (url.pathname === '/api/assistant') {
     // Bulut bekçisi listeye yapay zekâ yorumlarını ekler; ulaşılamazsa yorumsuz liste doğrudan Pages'ten
     try {

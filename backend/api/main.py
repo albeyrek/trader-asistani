@@ -117,6 +117,19 @@ def learned_model():
     return json.loads(learn.META_FILE.read_text(encoding="utf-8"))
 
 
+@app.get("/api/timemachine/{year}")
+def time_machine(year: str):
+    """Zaman makinesi (bulutta timemachine/{yıl}.json; 'index' yıl listesini verir)."""
+    if not learn.TIMEMACHINE_FILE.exists():
+        raise HTTPException(404, "Zaman makinesi verisi yok. 'python -m scanner.learn' çalıştırın.")
+    tm = json.loads(learn.TIMEMACHINE_FILE.read_text(encoding="utf-8"))
+    if year == "index":
+        return {"years": sorted(tm)}
+    if year not in tm:
+        raise HTTPException(404, "Bu yıl için veri yok")
+    return tm[year]
+
+
 @app.get("/api/levels")
 def price_levels():
     """Bulutta levels.json ile aynı: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]."""
