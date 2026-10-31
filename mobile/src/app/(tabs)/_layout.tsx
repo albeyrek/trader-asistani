@@ -23,8 +23,16 @@ export default function TabLayout() {
         headerTintColor: t.text,
         sceneStyle: { backgroundColor: t.bg },
       }}>
+      {/* Uygulama Asistan ile açılır (index = "/") */}
       <Tabs.Screen
         name="index"
+        options={{
+          title: 'Asistan',
+          tabBarIcon: tabIcon('sparkles-outline'),
+        }}
+      />
+      <Tabs.Screen
+        name="scan"
         options={{
           title: 'Tarama',
           tabBarIcon: tabIcon('stats-chart'),

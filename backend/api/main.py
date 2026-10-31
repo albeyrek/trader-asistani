@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from scanner import market, scorecard, views
+from scanner import assistant, assistant_track, market, scorecard, views
 from scanner.config import DATA_DIR
 from scanner.devices import upsert_device
 from scanner.prices import PRICE_FILE, to_weekly
@@ -91,6 +91,21 @@ def market_overview():
 def signal_scorecard():
     """Sinyal karnesi (bulutta scorecard.json). Yerelde kayıtlı geçmişle hesaplanır."""
     return scorecard.evaluate(scorecard.load_history(), _load(PRICE_FILE), _load(SCAN_FILE))
+
+
+@app.get("/api/assistant")
+def assistant_today():
+    """Asistan: günün alım adayları (bulutta assistant.json; yapay zekâ yorumu sadece bulutta eklenir)."""
+    side = _side_data()
+    prices, scan = _load(PRICE_FILE), _load(SCAN_FILE)
+    overview = market.overview(prices, scan, side.sectors if side else None)
+    return assistant.build(scan, prices, overview, side, pd.Timestamp(SCAN_FILE.stat().st_mtime, unit="s", tz="UTC"))
+
+
+@app.get("/api/assistant/score")
+def assistant_score():
+    """Asistan karnesi (bulutta assistant_score.json)."""
+    return assistant_track.evaluate(assistant_track.load_history(), _load(PRICE_FILE))
 
 
 @app.get("/api/levels")

@@ -4,6 +4,8 @@
 //  - GET  /api/status  : son turların özeti
 //  - her 5 dakikada (cron): KAP + izlenen hisselerin haberleri -> sınıflandır -> yenileri bildirim olarak gönder
 //  - piyasa saatlerinde 5 dakikada (ayrı cron): izlenen hisselerin fiyatı -> seviye kırılımı/sert hareket bildirimi
+//  - GET  /api/assistant : günün alım adayları + yapay zekâ yorumları
+//  - 10 dakikada bir (ayrı cron): yeni aday listesi için Workers AI yorumu, ardından liste bildirimi
 // Haber mantığı backend/scanner/watch.py ile aynıdır; kurallar ve eşikler GitHub Pages'teki watch_meta.json'dan gelir.
 
 import { Classifier, trLower, type Rules } from './classify';
@@ -11,15 +13,24 @@ import {
   alertTriggered, customAlertText, detectEvents, eventText, fetchQuotes, isFresh, type CustomAlert, type Levels,
   type PriceEvent,
 } from './prices';
-import { yahooSymbol, type Market } from './quotes';
+import {
+  AI_MODEL, candidateStatus, generate, listMessage, merge, openingMessage, pending, prune, quietHours, stoppedMessage,
+  type AiState, type AssistantData, type AssistantMarket, type Candidate,
+} from './assistant';
+import { yahooSymbol, type Market, type Quote } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
 
 // wrangler.toml'daki ikinci cron ile aynı olmalı (UTC; BIST 07:00-15:10, ABD 13:30-21:00 arası)
 const PRICE_CRON = '*/5 7-21 * * 1-5';
 const MAX_QUOTES = 40; // ücretsiz planda tur başına 50 alt istek sınırı
+// wrangler.toml'daki üçüncü cron ile aynı olmalı
+const ASSISTANT_CRON = '2-59/10 * * * *';
+const AI_PER_RUN = 4; // tur başına en fazla bu kadar yorum (her biri ~10 sn)
+const MAX_LIST_AGE_DAYS = 5; // daha eski aday listesi için gün içi takip yapılmaz
 
 export interface Env {
   KV: KVNamespace;
+  AI: Ai;
   DATA_URL: string; // https://albeyrek.github.io/trader-asistani/data
 }
 
@@ -36,6 +47,7 @@ interface Device {
   notify_all_severe: boolean;
   notify_price_alerts?: boolean; // eski kayıtlarda yok: açık kabul edilir
   custom_alerts?: CustomAlert[]; // kullanıcının kendi fiyat alarmları (her zaman etkin)
+  notify_assistant?: boolean; // asistan listesi ve aday takibi bildirimleri (eski kayıtlarda yok: açık)
   platform: string;
   updated_at: string;
 }
@@ -103,7 +115,7 @@ async function listDevices(env: Env): Promise<Record<string, Device>> {
 async function registerDevice(req: Request, env: Env): Promise<Response> {
   let body: {
     token?: unknown; watchlist?: unknown; notify_all_severe?: unknown; notify_price_alerts?: unknown;
-    custom_alerts?: unknown; platform?: unknown;
+    custom_alerts?: unknown; notify_assistant?: unknown; platform?: unknown;
   };
   try {
     body = await req.json();
@@ -128,6 +140,7 @@ async function registerDevice(req: Request, env: Env): Promise<Response> {
     notify_all_severe: body.notify_all_severe !== false,
     notify_price_alerts: body.notify_price_alerts !== false,
     custom_alerts: customAlerts,
+    notify_assistant: body.notify_assistant !== false,
     platform: typeof body.platform === 'string' ? body.platform.slice(0, 20) : 'android',
   };
   // KV ücretsiz planda günde 1000 yazma: değişmediyse yazma
@@ -305,9 +318,15 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
   const allDevices = Object.entries(await listDevices(env));
   // Otomatik seviye alarmları tercihe bağlı; kişisel alarmlar her zaman etkin
   const devices = allDevices.filter(([, d]) => d.notify_price_alerts !== false);
+  // Asistan adayları: liste yeni ise ve asistan bildirimi açık cihaz varsa takip edilir
+  const asstDevices = allDevices.filter(([, d]) => d.notify_assistant !== false);
+  const asst = asstDevices.length ? await fetchAssistant(env) : null;
+  const lists = (asst ? (Object.entries(asst.markets) as [Market, AssistantMarket][]) : [])
+    .filter(([, mk]) => mk.candidates.length && ageDays(mk.date) <= MAX_LIST_AGE_DAYS);
   const watched = new Set([
     ...devices.flatMap(([, d]) => d.watchlist.map((w) => `${w.market}:${w.symbol}`)),
     ...allDevices.flatMap(([, d]) => (d.custom_alerts ?? []).map((a) => `${a.market}:${a.symbol}`)),
+    ...lists.flatMap(([m, mk]) => mk.candidates.map((c) => `${m}:${c.symbol}`)),
   ]);
   if (!watched.size) return { at: new Date().toISOString(), watched: 0, quotes: 0, fresh: 0, events: 0, sent: 0 };
 
@@ -356,6 +375,31 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
     }
   }
 
+  // Asistan adayları: piyasa açılınca tek bir durum özeti; fiyat stopun altına inerse "plan geçersiz"
+  for (const [m, mk] of lists) {
+    const rows: { c: Candidate; q: Quote }[] = [];
+    for (const c of mk.candidates) {
+      const q = freshQuotes[`${m}:${c.symbol}`];
+      if (q) rows.push({ c, q });
+    }
+    const push = (title: string, body: string, data: Record<string, string>) => {
+      for (const [token] of asstDevices) messages.push({ to: token, title, body, data, sound: 'default', channelId: 'default' });
+    };
+    const openKey = `${today}|open|${m}`;
+    if (mk.date < today && rows.length * 2 >= mk.candidates.length && !(openKey in state.alerted)) {
+      const { title, body } = openingMessage(m, rows);
+      push(title, body, { screen: 'assistant', market: m });
+      firedAlerts.push(openKey);
+    }
+    for (const { c, q } of rows) {
+      const k = `${today}|cstop|${m}:${c.symbol}`;
+      if (candidateStatus(c, q) !== 'stopped' || k in state.alerted) continue;
+      const { title, body } = stoppedMessage(c, q);
+      push(title, body, { symbol: c.symbol, market: m });
+      firedAlerts.push(k);
+    }
+  }
+
   const sent = messages.length ? await send(messages, env) : 0;
   const last = {
     at: new Date().toISOString(), watched: watched.size, quotes: Object.keys(quotes).length, fresh: fresh.length,
@@ -373,6 +417,74 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
   return last;
 }
 
+// ------------------------------------------------------------------ asistan
+
+function ageDays(isoDate: string, now = Date.now()): number {
+  return (now - Date.parse(isoDate)) / 86400_000;
+}
+
+async function fetchAssistant(env: Env): Promise<AssistantData | null> {
+  const r = await fetch(`${env.DATA_URL}/assistant.json`, { cf: { cacheTtl: 60 } });
+  return r.ok ? ((await r.json()) as AssistantData) : null; // ilk yayından önce dosya yok
+}
+
+/** Yeni aday listesi için yapay zekâ yorumlarını yazar; liste tamamlanınca bildirim gönderir. */
+async function runAssistant(env: Env): Promise<AiState['last']> {
+  const at = new Date().toISOString();
+  const data = await fetchAssistant(env);
+  const st: AiState = (await env.KV.get<AiState>('assistant', 'json'))
+    ?? { version: '', texts: {}, tries: {}, notified: {}, model: AI_MODEL };
+  if (!data) return { at, generated: 0, failed: 0, pending: 0, sent: 0 };
+  const before = JSON.stringify(st);
+  if (st.model !== AI_MODEL) Object.assign(st, { texts: {}, tries: {}, model: AI_MODEL });
+  if (st.version !== data.version) {
+    prune(data, st);
+    st.version = data.version;
+  }
+
+  let generated = 0;
+  let failed = 0;
+  for (const { key, c, mk } of pending(data, st).slice(0, AI_PER_RUN)) {
+    let text: string | null = null;
+    try {
+      text = await generate(env.AI, c, mk);
+    } catch {
+      // kota dolduysa ya da model hata verdiyse sonraki turda yeniden denenir (en fazla 3 kez)
+    }
+    if (text) {
+      st.texts[key] = text;
+      generated++;
+    } else {
+      st.tries[key] = (st.tries[key] ?? 0) + 1;
+      failed++;
+    }
+  }
+  const left = pending(data, st);
+
+  // Liste bildirimi: piyasanın bütün adayları yorumlandıktan sonra, liste başına bir kez, gece saatleri dışında
+  let sent = 0;
+  if (!quietHours()) {
+    const devices = Object.entries(await listDevices(env)).filter(([, d]) => d.notify_assistant !== false);
+    const messages: PushMessage[] = [];
+    for (const [m, mk] of Object.entries(data.markets) as [Market, AssistantMarket][]) {
+      if (st.notified[m] === mk.date || ageDays(mk.date) > 3 || left.some((p) => p.c.market === m)) continue;
+      const { title, body } = listMessage(m, mk);
+      for (const [token] of devices) {
+        messages.push({ to: token, title, body, data: { screen: 'assistant', market: m }, sound: 'default', channelId: 'default' });
+      }
+      st.notified[m] = mk.date;
+    }
+    if (messages.length) sent = await send(messages, env);
+  }
+  const last = { at, generated, failed, pending: left.length, sent };
+  // KV ücretsiz planda günde 1000 yazma: sadece değişiklik varsa yaz
+  if (JSON.stringify(st) !== before) {
+    st.last = last;
+    await env.KV.put('assistant', JSON.stringify(st));
+  }
+  return last;
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
@@ -383,20 +495,41 @@ export default {
     }
     if (url.pathname === '/api/devices' && req.method === 'POST') return registerDevice(req, env);
     if (url.pathname === '/api/quotes') return quotesEndpoint(url);
+    if (url.pathname === '/api/assistant') {
+      const data = await fetchAssistant(env);
+      if (!data) return json({ detail: 'Asistan verisi henüz yayınlanmadı' }, 404);
+      const st = await env.KV.get<AiState>('assistant', 'json');
+      return new Response(JSON.stringify(merge(data, st)), {
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' },
+      });
+    }
     if (url.pathname === '/api/status') {
       const state = await env.KV.get<State>('state', 'json');
       const prices = await env.KV.get<PriceState>('price_state', 'json');
+      const asst = await env.KV.get<AiState>('assistant', 'json');
       return json({
         last: state?.last ?? null,
         seen: state ? Object.keys(state.seen).length : 0,
         prices: prices?.last ?? null,
         alerts_today: prices ? Object.keys(prices.alerted).length : 0,
+        assistant: asst ? { ...asst.last, version: asst.version, texts: Object.keys(asst.texts).length, notified: asst.notified } : null,
       });
     }
     return json({ detail: 'Bulunamadı' }, 404);
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === ASSISTANT_CRON) {
+      ctx.waitUntil(
+        runAssistant(env).catch(async (e: unknown) => {
+          const st = await env.KV.get<AiState>('assistant', 'json');
+          if (!st) return;
+          st.last = { ...(st.last ?? { generated: 0, failed: 0, pending: 0, sent: 0 }), at: new Date().toISOString(), error: String(e) };
+          await env.KV.put('assistant', JSON.stringify(st));
+        }),
+      );
+      return;
+    }
     if (event.cron === PRICE_CRON) {
       ctx.waitUntil(
         runPrices(env).catch(async (e: unknown) => {

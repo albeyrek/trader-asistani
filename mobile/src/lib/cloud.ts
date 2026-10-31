@@ -45,6 +45,22 @@ export async function cloudGet<T>(path: string, signal?: AbortSignal): Promise<T
   if (url.pathname === '/api/levels') return get<T>('levels.json', signal);
   if (url.pathname === '/api/market') return get<T>('market.json', signal);
   if (url.pathname === '/api/scorecard') return get<T>('scorecard.json', signal);
+  if (url.pathname === '/api/assistant/score') return get<T>('assistant_score.json', signal);
+  if (url.pathname === '/api/assistant') {
+    // Bulut bekçisi listeye yapay zekâ yorumlarını ekler; ulaşılamazsa yorumsuz liste doğrudan Pages'ten
+    try {
+      const res = await fetch(`${WORKER_URL}/api/assistant`, { signal });
+      if (res.ok) return (await res.json()) as T;
+    } catch (e) {
+      if (signal?.aborted) throw e;
+    }
+    try {
+      return await get<T>('assistant.json', signal);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('bulunamadı')) throw new Error('Asistan listesi henüz yayınlanmadı.');
+      throw e;
+    }
+  }
 
   if (url.pathname === '/api/scan') {
     const m = market(p.get('market'));

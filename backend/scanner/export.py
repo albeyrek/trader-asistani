@@ -12,6 +12,9 @@ site/data/
                                 sınıflandırma kuralları ve eşikler (tek kaynak: Python kodu)
   levels.json                   gün içi alarmlar için son kapanış, destek, direnç, stop seviyeleri
   market.json                   piyasa rejimi: endeksler, genişlik ve geçmişi, rejim etiketi, sektörler
+  assistant.json                asistan: günün alım adayları, işlem planları, kural tabanlı yorumlar
+  assistant_score.json          asistan karnesi: geçmiş adaylar plana uyulsaydı sonuç (R)
+  assistant_history.json        karnenin ham geçmişi
   scorecard.json                sinyal karnesi: geçmiş listelerin 5/10/20 gün sonraki fazla getirisi
   signals_history.json          karnenin ham geçmişi (önbellek silinirse buradan devam edilir)
 """
@@ -24,7 +27,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
-from . import scorecard, views
+from . import assistant, assistant_track, scorecard, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -93,7 +96,16 @@ def export(out: Path) -> None:
         },
     })
     # Piyasa rejimi: endeksler, genişlik, rejim etiketi (tüm fiyatlar gerekir: endeksler taranan hisselerde değil)
-    _write(data / "market.json", market_view.overview(all_prices, scan, side.sectors))
+    overview = market_view.overview(all_prices, scan, side.sectors)
+    _write(data / "market.json", overview)
+    # Asistan: günün alım adayları ve işlem planları; geçmiş adayların sonucu (asistan karnesi)
+    asst = assistant.build(scan, all_prices, overview, side, updated)
+    _write(data / "assistant.json", asst)
+    yf_of = {f"{r.market}:{r.symbol}": r.yf_symbol for r in scan.itertuples()}
+    a_hist = assistant_track.record(assistant_track.load_history(), asst, yf_of)
+    assistant_track.save_history(a_hist)
+    _write(data / "assistant_history.json", a_hist)
+    _write(data / "assistant_score.json", assistant_track.evaluate(a_hist, all_prices))
     # Sinyal karnesi: bugünün listelerini kaydet, geçmiştekilerin sonraki getirisini ölç
     history = scorecard.record(scorecard.load_history(), scan)
     scorecard.save_history(history)

@@ -238,3 +238,103 @@ export interface Meta {
   reliability: Record<Market, Reliability>;
   disclaimer: string;
 }
+
+// ------------------------------------------------------------------ asistan
+
+export type SetupKind = 'breakout' | 'pullback' | 'trend';
+
+export interface AssistantCheck {
+  label: string;
+  ok: boolean;
+  text: string;
+}
+
+/** Günün alım adayı ve işlem planı (backend/scanner/assistant.py). */
+export interface Candidate {
+  symbol: string;
+  market: Market;
+  name: string;
+  sector: string | null;
+  close: number;
+  change_pct: number | null;
+  combined_score: number;
+  rs_rating: number;
+  rsi: number;
+  setup: SetupKind;
+  setup_text: string;
+  entry_low: number;
+  entry_high: number;
+  stop: number;
+  target1: number;
+  target2: number;
+  rr: number;
+  risk_pct: number;
+  projected: boolean; // zirvede: hedefler stop mesafesinin katları
+  quality: number;
+  checks: AssistantCheck[];
+  reasons: string[];
+  news: { title: string; url: string; source: string; sentiment: number; date: string | null }[];
+  earnings_date: string | null;
+  earnings_status: EarningsStatus | null;
+  commentary: string; // kural tabanlı yorum
+  ai?: string; // yapay zekâ yorumu (bulut bekçisi ekler)
+}
+
+export type RadarItem = Pick<Candidate,
+  'symbol' | 'market' | 'name' | 'close' | 'change_pct' | 'rs_rating' | 'setup' | 'setup_text' | 'entry_low' |
+  'entry_high' | 'stop' | 'target1' | 'rr' | 'risk_pct' | 'quality'>;
+
+export interface AssistantMarket {
+  date: string;
+  regime: { label: MarketRegime['label']; score: number; summary: string };
+  risk_scale: number; // önerilen pozisyon çarpanı (zayıf piyasada 0,5)
+  stance: string;
+  screened: number;
+  passed_filter: number;
+  with_plan: number;
+  candidates: Candidate[];
+  radar: RadarItem[];
+}
+
+export interface AssistantData {
+  version: string;
+  generated_at: string;
+  markets: Partial<Record<Market, AssistantMarket>>;
+  disclaimer: string;
+  ai_model?: string | null;
+}
+
+export type TradeStatus = 'pending' | 'not_filled' | 'open' | 'target' | 'stop' | 'timeout';
+
+export interface AssistantTrade {
+  date: string;
+  symbol: string;
+  setup: SetupKind;
+  regime: string | null;
+  planned_rr: number | null;
+  status: TradeStatus;
+  days: number;
+  r: number | null;
+  fill: number | null;
+  exit: number | null;
+  exit_date: string | null;
+}
+
+export interface AssistantScoreMarket {
+  snapshots: number;
+  first_date: string | null;
+  signals: number;
+  filled: number;
+  not_filled: number;
+  open: number;
+  closed: number;
+  targets: number;
+  stops: number;
+  timeouts: number;
+  win_rate: number | null;
+  avg_r: number | null;
+  total_r: number | null;
+  trades: AssistantTrade[];
+}
+
+export type AssistantScore = Partial<Record<Market, AssistantScoreMarket>>;

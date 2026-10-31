@@ -13,6 +13,7 @@ const WATCHLIST_KEY = 'watchlist';
 const SEVERE_ALL_KEY = 'notifyAllSevere';
 const PRICE_ALERTS_KEY = 'notifyPriceAlerts';
 const CUSTOM_ALERTS_KEY = 'customAlerts';
+const ASSISTANT_KEY = 'notifyAssistant';
 const API_PORT = 8000;
 
 /** Kişisel fiyat alarmı: "THYAO 245'in altına inerse" (bulut bekçisi piyasa saatlerinde 5 dakikada bir kontrol eder). */
@@ -61,6 +62,9 @@ interface SettingsValue {
   setNotifyAllSevere: (v: boolean) => void;
   notifyPriceAlerts: boolean;
   setNotifyPriceAlerts: (v: boolean) => void;
+  /** Asistan: günün aday listesi, açılış özeti ve "plan geçersiz" bildirimleri */
+  notifyAssistant: boolean;
+  setNotifyAssistant: (v: boolean) => void;
   customAlerts: CustomAlert[];
   addAlert: (a: Omit<CustomAlert, 'id'>) => void;
   removeAlert: (id: string) => void;
@@ -78,6 +82,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [notifyAllSevere, setNotifyAllSevereState] = useState(true);
   const [notifyPriceAlerts, setNotifyPriceAlertsState] = useState(true);
   const [customAlerts, setCustomAlerts] = useState<CustomAlert[]>([]);
+  const [notifyAssistant, setNotifyAssistantState] = useState(true);
   const [push, setPush] = useState<PushStatus | null>(null);
   const [sync, setSync] = useState<SyncState>(null);
   const [syncNonce, setSyncNonce] = useState(0);
@@ -85,14 +90,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [url, wl, severe, savedMode, priceAlerts, alerts] = await Promise.all([
+        const [url, wl, severe, savedMode, priceAlerts, alerts, assistant] = await Promise.all([
           AsyncStorage.getItem(API_URL_KEY),
           AsyncStorage.getItem(WATCHLIST_KEY),
           AsyncStorage.getItem(SEVERE_ALL_KEY),
           AsyncStorage.getItem(MODE_KEY),
           AsyncStorage.getItem(PRICE_ALERTS_KEY),
           AsyncStorage.getItem(CUSTOM_ALERTS_KEY),
+          AsyncStorage.getItem(ASSISTANT_KEY),
         ]);
+        if (assistant != null) setNotifyAssistantState(assistant === 'true');
         if (alerts) setCustomAlerts(JSON.parse(alerts));
         if (priceAlerts != null) setNotifyPriceAlertsState(priceAlerts === 'true');
         if (url) setApiUrlState(url);
@@ -126,7 +133,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         token, watchlist, notify_all_severe: notifyAllSevere, notify_price_alerts: notifyPriceAlerts,
-        custom_alerts: customAlerts, platform: Platform.OS,
+        custom_alerts: customAlerts, notify_assistant: notifyAssistant, platform: Platform.OS,
       }),
     })
       .then((r) => {
@@ -139,7 +146,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, notifyPriceAlerts, customAlerts, syncNonce]);
+  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, notifyPriceAlerts, customAlerts, notifyAssistant, syncNonce]);
 
   const addAlert = useCallback((a: Omit<CustomAlert, 'id'>) => {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -161,6 +168,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const setNotifyPriceAlerts = useCallback((v: boolean) => {
     setNotifyPriceAlertsState(v);
     AsyncStorage.setItem(PRICE_ALERTS_KEY, String(v)).catch(() => {});
+  }, []);
+
+  const setNotifyAssistant = useCallback((v: boolean) => {
+    setNotifyAssistantState(v);
+    AsyncStorage.setItem(ASSISTANT_KEY, String(v)).catch(() => {});
   }, []);
 
   const setMode = useCallback((m: DataMode) => {
@@ -208,6 +220,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setNotifyAllSevere,
       notifyPriceAlerts,
       setNotifyPriceAlerts,
+      notifyAssistant,
+      setNotifyAssistant,
       customAlerts,
       addAlert,
       removeAlert,
@@ -215,7 +229,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       resync,
     }),
     [ready, mode, setMode, apiUrl, setApiUrl, watchlist, toggleWatch, push, notifyAllSevere, setNotifyAllSevere,
-      notifyPriceAlerts, setNotifyPriceAlerts, customAlerts, addAlert, removeAlert, sync, resync],
+      notifyPriceAlerts, setNotifyPriceAlerts, notifyAssistant, setNotifyAssistant, customAlerts, addAlert, removeAlert, sync, resync],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

@@ -128,7 +128,8 @@ export default function SettingsScreen() {
 function NotificationsCard() {
   const t = useTheme();
   const {
-    push, notifyAllSevere, setNotifyAllSevere, notifyPriceAlerts, setNotifyPriceAlerts, sync, resync, watchlist, mode,
+    push, notifyAllSevere, setNotifyAllSevere, notifyPriceAlerts, setNotifyPriceAlerts, notifyAssistant,
+    setNotifyAssistant, sync, resync, watchlist, mode,
   } = useSettings();
 
   let status: { text: string; color: string };
@@ -162,6 +163,13 @@ function NotificationsCard() {
           günde %5’ten fazla hareket ederse bildir (piyasa saatlerinde 5 dakikada bir; BIST 15 dk gecikmeli)
         </Text>
         <Switch value={notifyPriceAlerts} onValueChange={setNotifyPriceAlerts} />
+      </View>
+      <View style={[styles.switchRow, { borderTopColor: t.border }]}>
+        <Text style={[styles.text, { color: t.text, flex: 1 }]}>
+          Asistan: günün alım adayları hazır olunca (BIST akşam, ABD sabah), piyasa açılınca adayların durumu ve bir
+          adayın fiyatı plandaki stopun altına inerse bildir{mode === 'cloud' ? '' : ' (sadece bulut modunda)'}
+        </Text>
+        <Switch value={notifyAssistant} onValueChange={setNotifyAssistant} />
       </View>
       {push?.state === 'ok' && !sync?.ok ? (
         <Pressable onPress={resync} style={[styles.button, styles.buttonOutline, { borderColor: t.border, marginTop: 8 }]}>

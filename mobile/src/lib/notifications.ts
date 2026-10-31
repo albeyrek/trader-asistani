@@ -53,7 +53,7 @@ export async function registerForPush(): Promise<PushStatus> {
   }
 }
 
-/** Bildirime dokununca ilgili hissenin detay ekranını açar (uygulama kapalıyken gelenler dahil).
+/** Bildirime dokununca ilgili hissenin detay ekranını (asistan bildiriminde Asistan sekmesini) açar (uygulama kapalıyken gelenler dahil).
  *  Web'de bildirim API'si yok; platform çalışma boyunca değişmediği için hook kuralları bozulmaz. */
 export const useNotificationRouting: () => void = Platform.OS === 'web' ? () => {} : useNativeNotificationRouting;
 
@@ -61,8 +61,10 @@ function useNativeNotificationRouting() {
   const last = Notifications.useLastNotificationResponse();
 
   useEffect(() => {
-    const data = last?.notification.request.content.data as { symbol?: string; market?: Market } | undefined;
-    if (data?.symbol) {
+    const data = last?.notification.request.content.data as { symbol?: string; market?: Market; screen?: string } | undefined;
+    if (data?.screen === 'assistant') {
+      router.navigate({ pathname: '/', params: { market: data.market ?? 'BIST' } });
+    } else if (data?.symbol) {
       router.push({ pathname: '/stock/[symbol]', params: { symbol: data.symbol, market: data.market ?? 'BIST' } });
     }
   }, [last]);
