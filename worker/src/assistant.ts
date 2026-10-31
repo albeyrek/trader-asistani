@@ -79,6 +79,14 @@ export function candidateKey(market: string, date: string, symbol: string): stri
   return `${market}:${date}:${symbol}`;
 }
 
+/** Yorum anahtarı: aday + modele giden bilgilerin özeti. Bilgi değişirse (ör. haftalık model eğitimi, yeni haber)
+ *  yorum yeniden yazılır. */
+export function textKey(c: Candidate, mk: AssistantMarket): string {
+  let h = 2166136261; // FNV-1a
+  for (const ch of buildPrompt(c, mk)[1].content) h = Math.imul(h ^ ch.codePointAt(0)!, 16777619);
+  return `${candidateKey(c.market, mk.date, c.symbol)}:${(h >>> 0).toString(36)}`;
+}
+
 export function fmt(v: number): string {
   const digits = Math.abs(v) >= 1000 ? 0 : Math.abs(v) >= 10 ? 2 : 3;
   return v.toLocaleString('tr-TR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -187,7 +195,7 @@ export function pending(data: AssistantData, st: AiState): { key: string; c: Can
   for (const mk of Object.values(data.markets)) {
     if (!mk) continue;
     for (const c of mk.candidates) {
-      const key = candidateKey(c.market, mk.date, c.symbol);
+      const key = textKey(c, mk);
       if (!st.texts[key] && (st.tries[key] ?? 0) < MAX_TRIES) out.push({ key, c, mk });
     }
   }
@@ -197,7 +205,7 @@ export function pending(data: AssistantData, st: AiState): { key: string; c: Can
 /** Yorumu bitmiş liste için hâlâ geçerli olan anahtarlar dışındakileri at (KV kaydı küçük kalsın). */
 export function prune(data: AssistantData, st: AiState): void {
   const live = new Set<string>();
-  for (const mk of Object.values(data.markets)) for (const c of mk?.candidates ?? []) live.add(candidateKey(c.market, mk!.date, c.symbol));
+  for (const mk of Object.values(data.markets)) for (const c of mk?.candidates ?? []) live.add(textKey(c, mk!));
   for (const k of Object.keys(st.texts)) if (!live.has(k)) delete st.texts[k];
   for (const k of Object.keys(st.tries)) if (!live.has(k)) delete st.tries[k];
 }
@@ -208,7 +216,7 @@ export function merge(data: AssistantData, st: AiState | null): AssistantData & 
     markets[m] = {
       ...mk,
       candidates: mk.candidates.map((c) => {
-        const ai = st?.texts[candidateKey(c.market, mk.date, c.symbol)];
+        const ai = st?.texts[textKey(c, mk)];
         return ai ? { ...c, ai } : c;
       }),
     };

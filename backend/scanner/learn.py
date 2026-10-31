@@ -402,7 +402,7 @@ def recalibration(oos: pd.DataFrame) -> dict[str, float]:
     last = oos[oos["fold"] == 0]
     out = {}
     for market, g in last.groupby("market"):
-        if len(g) >= 100 and 0 < g["y"].mean() < 1:
+        if len(g) >= 30 and 0 < g["y"].mean() < 1:
             raw = float(_logit(g["y"].mean()) - _logit(g["p"].to_numpy()).mean())
             # Az örnekle ya da tek bir uç dönemle aşırı düzeltme olmasın: örnek sayısıyla küçült, ±MAX_OFFSET ile sınırla
             out[market] = round(float(np.clip(raw * len(g) / (len(g) + OFFSET_SHRINK_N), -MAX_OFFSET, MAX_OFFSET)), 4)

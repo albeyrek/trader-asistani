@@ -1,6 +1,6 @@
 // Asistan yardımcılarının testi: npx tsx test/assistant.ts
 import {
-  candidateKey, candidateStatus, cleanText, listMessage, merge, openingMessage, pending, prune, quietHours,
+  candidateStatus, textKey, cleanText, listMessage, merge, openingMessage, pending, prune, quietHours,
   type AiState, type AssistantData, type AssistantMarket, type Candidate,
 } from '../src/assistant';
 import type { Quote } from '../src/quotes';
@@ -24,16 +24,19 @@ const data: AssistantData = { version: 'v2', generated_at: '', markets: { BIST: 
 const q = (price: number): Quote => ({ price, prev_close: 100, change_pct: price - 100, time: new Date().toISOString(), delayed: true });
 
 // pending / prune / merge
+const mkB = data.markets.BIST!;
+const [cA, cB] = mkB.candidates;
 const st: AiState = {
   version: 'v1', model: 'm', notified: {},
-  texts: { [candidateKey('BIST', '2026-10-30', 'AAA')]: 'yorum A', 'BIST:2026-10-29:OLD': 'eski' },
-  tries: { [candidateKey('BIST', '2026-10-30', 'BBB')]: 2 },
+  texts: { [textKey(cA, mkB)]: 'yorum A', 'BIST:2026-10-29:OLD:x': 'eski' },
+  tries: { [textKey(cB, mkB)]: 2 },
 };
 check('bekleyen: yorumsuz ve hakkı kalan', JSON.stringify(pending(data, st).map((p) => p.c.symbol)) === '["BBB"]');
-st.tries[candidateKey('BIST', '2026-10-30', 'BBB')] = 3;
+st.tries[textKey(cB, mkB)] = 3;
 check('3 denemeden sonra bekleyen yok', pending(data, st).length === 0);
 prune(data, st);
-check('eski liste yorumu silinir', !('BIST:2026-10-29:OLD' in st.texts) && 'BIST:2026-10-30:AAA' in st.texts);
+check('eski liste yorumu silinir', !('BIST:2026-10-29:OLD:x' in st.texts) && textKey(cA, mkB) in st.texts);
+check('bilgi değişince yorum anahtarı değişir', textKey({ ...cA, rr: 3.1 }, mkB) !== textKey(cA, mkB));
 const merged = merge(data, st);
 check('merge: yorum adaya eklenir', merged.markets.BIST!.candidates[0].ai === 'yorum A' && merged.markets.BIST!.candidates[1].ai === undefined);
 
