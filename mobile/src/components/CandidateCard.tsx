@@ -12,6 +12,12 @@ import { useSettings } from '@/lib/settings';
 import { useTheme, type Theme } from '@/lib/theme';
 import type { Candidate } from '@/lib/types';
 
+/** +0,25R biçimi (1R = stop mesafesi kadar kazanç/kayıp) */
+export function rText(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return `${v > 0 ? '+' : v < 0 ? '−' : ''}${f.num(Math.abs(v), 2)}R`;
+}
+
 export type ZoneStatus = 'in_zone' | 'above' | 'below' | 'stopped';
 
 /** Güncel fiyatın plana göre yeri (bulut bekçisindeki candidateStatus ile aynı). */
@@ -83,6 +89,13 @@ export function CandidateCard({ c, quote, riskScale }: { c: Candidate; quote?: Q
         <Chip label={c.setup_text} fg={t.accent} bg={t.neutralBg} />
         <Chip label={`Göreli güç ${c.rs_rating}`} fg={c.rs_rating >= 80 ? t.up : t.muted} bg={c.rs_rating >= 80 ? t.upBg : t.neutralBg} />
         <Chip label={ZONE_TEXT[status]} fg={zc.fg} bg={zc.bg} />
+        {c.model ? (
+          <Chip
+            label={`Hedefe ulaşma %${Math.round(c.model.p * 100)}${c.model.exp_r != null ? ` · ${rText(c.model.exp_r)}` : ''}`}
+            fg={t.text}
+            bg={t.neutralBg}
+          />
+        ) : null}
       </View>
 
       <View style={[styles.plan, { borderColor: t.border }]}>

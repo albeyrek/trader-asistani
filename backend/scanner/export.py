@@ -15,6 +15,7 @@ site/data/
   assistant.json                asistan: günün alım adayları, işlem planları, kural tabanlı yorumlar
   assistant_score.json          asistan karnesi: geçmiş adaylar plana uyulsaydı sonuç (R)
   assistant_history.json        karnenin ham geçmişi
+  model.json                    öğrenen model: eğitim tarihi, ileriye dönük test sonuçları, öğrenilenler
   scorecard.json                sinyal karnesi: geçmiş listelerin 5/10/20 gün sonraki fazla getirisi
   signals_history.json          karnenin ham geçmişi (önbellek silinirse buradan devam edilir)
 """
@@ -27,7 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
-from . import assistant, assistant_track, scorecard, views
+from . import assistant, assistant_track, learn, scorecard, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -106,6 +107,9 @@ def export(out: Path) -> None:
     assistant_track.save_history(a_hist)
     _write(data / "assistant_history.json", a_hist)
     _write(data / "assistant_score.json", assistant_track.evaluate(a_hist, all_prices))
+    # Öğrenen model: nasıl öğrendiği, test sonuçları, neye baktığı (haftalık eğitim: scanner/learn.py)
+    if learn.META_FILE.exists():
+        _write(data / "model.json", json.loads(learn.META_FILE.read_text(encoding="utf-8")))
     # Sinyal karnesi: bugünün listelerini kaydet, geçmiştekilerin sonraki getirisini ölç
     history = scorecard.record(scorecard.load_history(), scan)
     scorecard.save_history(history)

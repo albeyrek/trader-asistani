@@ -2,7 +2,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { CandidateCard, zoneStatus } from '@/components/CandidateCard';
+import { CandidateCard, rText, zoneStatus } from '@/components/CandidateCard';
+import { ModelCard } from '@/components/ModelCard';
 import { Card, Chip, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
@@ -10,7 +11,7 @@ import { usePortfolio } from '@/lib/portfolio';
 import { quoteKey, useQuotes } from '@/lib/quotes';
 import { regimeColors, useTheme } from '@/lib/theme';
 import type {
-  AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, Market, StockSummary, TradeStatus,
+  AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, Market, ModelMeta, StockSummary, TradeStatus,
 } from '@/lib/types';
 
 /** "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop] */
@@ -23,13 +24,14 @@ export default function AssistantScreen() {
   const market: Market = picked ?? (params.market === 'US' ? 'US' : 'BIST');
   const { data, error, loading, reload } = useApi<AssistantData>('/api/assistant');
   const score = useApi<AssistantScore>('/api/assistant/score');
+  const model = useApi<ModelMeta>('/api/model');
   const mk = data?.markets[market];
   const quotes = useQuotes(mk?.candidates ?? []);
 
   return (
     <ScrollView
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); }} />}>
+      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); model.reload(); }} />}>
       <Segmented
         options={[{ value: 'BIST', label: 'BIST' }, { value: 'US', label: 'ABD' }]}
         value={market}
@@ -49,6 +51,7 @@ export default function AssistantScreen() {
           <RadarCard mk={mk} />
           <PortfolioCheck market={market} mk={mk} />
           <ScoreCard sc={score.data?.[market]} />
+          <ModelCard meta={model.data} market={market} />
           <Text style={[styles.disclaimer, { color: t.muted }]}>
             {data.disclaimer}
             {data.ai_model ? ` Yorumlar yapay zekâ ile (${data.ai_model.split('/').pop()}) yazılır ve hata içerebilir; sayılar plandan gelir.` : ''}
@@ -67,11 +70,21 @@ function StanceCard({ mk, market }: { mk: AssistantMarket; market: Market }) {
     <Card
       title={n ? `Günün alım adayları (${n})` : 'Bugün aday yok'}
       right={<Chip label={`Piyasa: ${mk.regime.label}`} fg={rc.fg} bg={rc.bg} />}>
+      {mk.form ? (
+        <View style={{ marginBottom: 8 }}>
+          <Chip
+            label={`Strateji formu (8 hafta): ${rText(mk.form.recent_r)}${mk.form.recent_r <= 0 ? ' · temkin modu' : ''}`}
+            fg={mk.form.recent_r > 0 ? t.up : t.down}
+            bg={mk.form.recent_r > 0 ? t.upBg : t.downBg}
+          />
+        </View>
+      ) : null}
       <Text style={[styles.text, { color: t.text }]}>{mk.stance}</Text>
       <Text style={[styles.small, { color: t.muted, marginTop: 8 }]}>
         {f.date(mk.date)} kapanışına göre {mk.screened} hisse tarandı; {mk.passed_filter} hisse süzgeçten geçti (yükseliş
         trendi, göreli güç ≥70, olumsuz haber ve uyarı yok, yakında bilanço yok), {mk.with_plan} tanesi için uygun ödül/risk
         planı çıktı.{mk.risk_scale < 1 ? ` Piyasa ortamı nedeniyle önerilen pozisyon büyüklüğü ×${f.num(mk.risk_scale, 2)}.` : ''}
+        {mk.ranking === 'model' ? ' Sıralamayı öğrenen model yaptı; beklenen getirisi düşük olanlar elendi.' : ''}
         {market === 'BIST' ? ' Liste her iş günü ~18:45’te, ABD listesi sabah yenilenir.' : ' Liste her sabah (ABD kapanışından sonra) yenilenir.'}
       </Text>
     </Card>
@@ -97,7 +110,9 @@ function RadarCard({ mk }: { mk: AssistantMarket }) {
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[styles.small, { color: t.text }]}>Giriş {f.price(r.entry_low)}–{f.price(r.entry_high)}</Text>
-            <Text style={[styles.small, { color: t.muted }]}>stop {f.price(r.stop)} · Ö/R {f.num(r.rr, 1)} · göreli güç {r.rs_rating}</Text>
+            <Text style={[styles.small, { color: t.muted }]}>
+              stop {f.price(r.stop)} · Ö/R {f.num(r.rr, 1)}{r.model ? ` · hedefe ulaşma %${Math.round(r.model.p * 100)}${r.model.exp_r != null ? ` (${rText(r.model.exp_r)})` : ''}` : ` · göreli güç ${r.rs_rating}`}
+            </Text>
           </View>
         </Pressable>
       ))}

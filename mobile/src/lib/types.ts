@@ -278,11 +278,20 @@ export interface Candidate {
   earnings_status: EarningsStatus | null;
   commentary: string; // kural tabanlı yorum
   ai?: string; // yapay zekâ yorumu (bulut bekçisi ekler)
+  model?: ModelPrediction | null;
+}
+
+/** Öğrenen modelin aday için tahmini (backend/scanner/learn.py). */
+export interface ModelPrediction {
+  p: number; // ilk hedefe stoptan önce ulaşma olasılığı (0-1)
+  exp_r: number | null; // beklenen getiri (R; 1R = stop mesafesi); getiri modeli testi geçmediyse null
+  similar: { market: Market; setup: SetupKind; breadth: string; n: number; win: number; avg_r: number } | null;
+  reliable: boolean; // model ileriye dönük testi geçti mi
 }
 
 export type RadarItem = Pick<Candidate,
   'symbol' | 'market' | 'name' | 'close' | 'change_pct' | 'rs_rating' | 'setup' | 'setup_text' | 'entry_low' |
-  'entry_high' | 'stop' | 'target1' | 'rr' | 'risk_pct' | 'quality'>;
+  'entry_high' | 'stop' | 'target1' | 'rr' | 'risk_pct' | 'quality' | 'model'>;
 
 export interface AssistantMarket {
   date: string;
@@ -294,6 +303,9 @@ export interface AssistantMarket {
   with_plan: number;
   candidates: Candidate[];
   radar: RadarItem[];
+  ranking?: 'model' | 'rules'; // sıralamayı öğrenen model mi, kurallar mı yaptı
+  /** Strateji formu: asistanın planları son 8 haftada (geçmiş veride) ne kazandırdı; negatifse temkin modu */
+  form?: { recent_r: number; recent_n: number; recent_win: number | null; long_r: number; long_n: number } | null;
 }
 
 export interface AssistantData {
@@ -338,3 +350,43 @@ export interface AssistantScoreMarket {
 }
 
 export type AssistantScore = Partial<Record<Market, AssistantScoreMarket>>;
+
+/** Öğrenen modelin özeti (model.json): haftalık eğitim, ileriye dönük test sonuçları, öğrenilenler. */
+export interface ModelMeta {
+  trained_at: string;
+  trained_until: string;
+  n_samples: number;
+  reliable: boolean; // getiri modeli testi geçti mi (geçtiyse adayları o sıralar)
+  spec_text: string;
+  metrics: {
+    clf: { auc: number; brier: number; logloss: number; base_rate: number };
+    reg: {
+      ic: number;
+      ic_t: number;
+      model_top_r: number | null;
+      rule_top_r: number | null;
+      all_r: number;
+      n_test: number;
+      test_from: string;
+      test_to: string;
+    };
+  };
+  period: { from: string; to: string };
+  by_market: Partial<Record<Market, { n: number; win: number; avg_r: number }>>;
+  calibration: { from: number; to: number; n: number; predicted: number; actual: number; avg_r: number }[];
+  clf_offset: Partial<Record<Market, number>>;
+  insights: { feature: string; name: string; importance: number; hi: number; lo: number; text: string }[];
+  form: Partial<Record<Market, {
+    recent_r: number | null;
+    recent_n: number;
+    recent_win: number | null;
+    recent_from: string;
+    recent_to: string;
+    long_r: number;
+    long_n: number;
+    weekly: { w: string; r: number; n: number }[];
+  }>>;
+  history: { trained_at: string; n: number; auc: number; ic: number; model_top_r: number | null;
+    rule_top_r: number | null; all_r: number; reliable: boolean; decision: string }[];
+  last_decision: string;
+}

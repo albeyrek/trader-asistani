@@ -1,0 +1,64 @@
+# Haftalık öğrenme: asistan planlarını geçmiş veride yeniden oynatır, modeli ileriye dönük testle yeniden eğitir,
+# testi geçerse devreye alır (bkz. backend/scanner/learn.py), ardından siteyi yeni modelle yeniden yayınlar.
+# Cumartesi 05:00 UTC = 08:00 TR (piyasalar kapalı, günlük tarama ile çakışmaz).
+name: Haftalik ogrenme
+
+on:
+  schedule:
+    - cron: "0 5 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-scan
+  cancel-in-progress: false
+
+jobs:
+  learn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      # Günlük taramanın verisi (fiyat geçmişi, tarama, önceki model); yeni model aynı önbelleğe kaydedilir
+      - name: Onceki veriyi geri yukle
+        uses: actions/cache@v4
+        with:
+          path: backend/data
+          key: data-${{ github.run_id }}
+          restore-keys: data-
+
+      - name: Ogrenme
+        run: python -m scanner.learn
+
+      - name: Disa aktarma
+        run: python -m scanner.export --out ../site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: learn
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

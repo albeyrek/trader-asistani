@@ -40,6 +40,13 @@ export interface Candidate {
   earnings_date: string | null;
   earnings_status: string | null;
   commentary: string;
+  /** Öğrenen modelin tahmini (backend/scanner/learn.py); model henüz eğitilmediyse yok */
+  model?: {
+    p: number; // ilk hedefe stoptan önce ulaşma olasılığı (0-1)
+    exp_r: number | null; // beklenen getiri, R cinsinden (1R = stop mesafesi); getiri modeli testi geçmediyse null
+    similar: { n: number; win: number; avg_r: number } | null;
+    reliable: boolean;
+  } | null;
   ai?: string; // bu Worker ekler
 }
 
@@ -48,6 +55,7 @@ export interface AssistantMarket {
   regime: { label: string; score: number; summary: string };
   risk_scale: number;
   stance: string;
+  form?: { recent_r: number; recent_n: number } | null; // asistanın planlarının son 8 haftalık sonucu
   candidates: Candidate[];
 }
 
@@ -91,7 +99,14 @@ const SYSTEM = [
   '"Kesin", "garanti", "mutlaka" gibi kelimeler kullanma; "aday", "düşünülebilir", "izlenebilir" gibi temkinli',
   'ifadeler kullan. Yatırım tavsiyesi uyarısı ekleme (uygulama zaten gösteriyor). Başlık, madde işareti,',
   'markdown ya da emoji kullanma. Hisseye kod adıyla değin.',
+  'Öğrenen modelin tahmini verildiyse onu da yoruma kat: olasılığı ve beklenen getiriyi yaz; olasılık %50 altındaysa',
+  'bunun "her işlem kazandırmaz, ödül riskten büyük olduğu için birkaç kazanç kayıpları telafi edebilir" anlamına',
+  'geldiğini kısaca açıkla. Benzer geçmiş kurulumların sonucu ya da strateji formu kötüyse bunu açıkça risk olarak belirt.',
 ].join(' ');
+
+function rText(v: number): string {
+  return `${v >= 0 ? '+' : '-'}${Math.abs(v).toFixed(2).replace('.', ',')}R`;
+}
 
 function currency(m: Market): string {
   return m === 'BIST' ? '₺' : '$';
@@ -113,10 +128,22 @@ export function buildPrompt(c: Candidate, mk: AssistantMarket): { role: 'system'
         : 'kayda değer haber yok'
     }`,
     `Piyasa rejimi: ${mk.regime.label}. ${mk.regime.summary}`,
+    mk.form
+      ? `Strateji formu: asistanın bu tür planları son 8 haftada (geçmiş veride, ${mk.form.recent_n} kurulum) ortalama ` +
+        `${rText(mk.form.recent_r)} ${mk.form.recent_r > 0 ? 'kazandırdı' : 'kaybettirdi; asistan temkin modunda (liste kısaltıldı, pozisyon yarıya indirildi)'}`
+      : '',
     `İşlem planı: giriş aralığı ${fmt(c.entry_low)}–${p(c.entry_high)}; stop ${p(c.stop)} (girişe göre risk ${pct(c.risk_pct)}); ` +
       `1. hedef ${p(c.target1)}; 2. hedef ${p(c.target2)}; ödül/risk ${c.rr.toFixed(1).replace('.', ',')}` +
       (c.projected ? ' (fiyat zirvede, üstte direnç yok; hedefler stop mesafesinin katları)' : ''),
     c.earnings_date ? `Bilanço tarihi: ${c.earnings_date}${c.earnings_status === 'estimated' ? ' (tahmini)' : ''}` : '',
+    c.model
+      ? 'Geçmiş verilerle eğitilen modelin tahmini: ' +
+        `ilk hedefe stoptan önce ulaşma olasılığı %${Math.round(c.model.p * 100)}` +
+        (c.model.exp_r != null ? `; beklenen getiri ${rText(c.model.exp_r)} (1R = stop mesafesi kadar kazanç/kayıp)` : '') +
+        (c.model.similar
+          ? `. Geçmişte benzer ${c.model.similar.n} kurulumda hedefe ulaşma %${Math.round(c.model.similar.win)}, ortalama ${rText(c.model.similar.avg_r)}`
+          : '')
+      : '',
   ].filter(Boolean);
   return [
     { role: 'system', content: SYSTEM },

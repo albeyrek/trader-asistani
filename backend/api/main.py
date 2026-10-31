@@ -4,6 +4,7 @@
     .venv\\Scripts\\python.exe -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 Telefon, bilgisayarla aynı Wi-Fi ağındaysa http://<bilgisayarın IP adresi>:8000 adresinden bağlanır.
 """
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -11,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from scanner import assistant, assistant_track, market, scorecard, views
+from scanner import assistant, assistant_track, learn, market, scorecard, views
 from scanner.config import DATA_DIR
 from scanner.devices import upsert_device
 from scanner.prices import PRICE_FILE, to_weekly
@@ -106,6 +107,14 @@ def assistant_today():
 def assistant_score():
     """Asistan karnesi (bulutta assistant_score.json)."""
     return assistant_track.evaluate(assistant_track.load_history(), _load(PRICE_FILE))
+
+
+@app.get("/api/model")
+def learned_model():
+    """Öğrenen model özeti (bulutta model.json)."""
+    if not learn.META_FILE.exists():
+        raise HTTPException(404, "Model henüz eğitilmedi. 'python -m scanner.learn' çalıştırın.")
+    return json.loads(learn.META_FILE.read_text(encoding="utf-8"))
 
 
 @app.get("/api/levels")
