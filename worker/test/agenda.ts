@@ -1,7 +1,9 @@
 // Gündem kurallarının testi: npx tsx test/agenda.ts   (canlı başlık örneği için: npx tsx test/agenda.ts --live)
 import {
-  calendar, classifyHeadline, fetchTopic, parseAiThemes, politicalRisk, summarize, TOPICS, type AgendaItem,
+  calendar, classifyHeadline, FALLBACK_FEEDS, fallbackItems, fetchFallback, fetchTopic, parseAiThemes, politicalRisk,
+  summarize, topicName, TOPICS, type AgendaItem,
 } from '../src/agenda';
+import { parseRss } from '../src/sources';
 
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -66,7 +68,36 @@ const parsed = parseAiThemes(good);
 check('YZ çıktısı: geçersiz sektör atılır', parsed?.[0].sectors.length === 1 && parsed[0].sectors[0].sector === 'banka', JSON.stringify(parsed));
 check('YZ çıktısı: bozuk JSON reddedilir', parseAiThemes('Bugün piyasalar karışık.') === null);
 
+// RSS ayrıştırma (CDATA, öznitelikli <item>, HTML karakterleri) ve yedek akış başlıkları
+const xml = `<rss><channel><title>Kanal</title>
+<item><title><![CDATA[Merkez Bankası politika faizini 250 baz puan indirdi]]></title><link>https://x/1</link>
+<pubDate>Sat, 14 Nov 2026 19:21:03 +0300</pubDate></item>
+<item rdf:about="https://x/2"><title>Dolar/TL yeni rekor kırdı &amp; borsa düştü</title><link>https://x/2</link>
+<pubDate>Sat, 14 Nov 2026 20:00:00 +0300</pubDate></item>
+<item><title>Eski haber</title><link>https://x/3</link><pubDate>Mon, 09 Nov 2026 10:00:00 +0300</pubDate></item>
+<item><title>Tarihsiz yerel haber</title><link>https://x/4</link></item>
+</channel></rss>`;
+const parsedRss = parseRss(xml);
+check('RSS: 4 haber, CDATA ve &amp; çözülür', parsedRss.length === 4 && parsedRss[0].title.startsWith('Merkez Bankası')
+  && parsedRss[1].title.includes('&'), JSON.stringify(parsedRss.map((x) => x.title)));
+check('RSS: tarih ISO', parsedRss[0].published === '2026-11-14T16:21:03.000Z', String(parsedRss[0].published));
+const fb = fallbackItems(FALLBACK_FEEDS[0], parsedRss, Date.parse('2026-11-14T22:00:00Z'));
+check('yedek: 24 saatten eski haber atılır', fb.length === 3 && !fb.some((x) => x.title === 'Eski haber'), fb.map((x) => x.title).join(' | '));
+check('yedek: konu temadan', fb[0].topic === 'faiz' && fb[1].topic === 'kur', fb.map((x) => x.topic).join(','));
+check('yedek: temasız haber akışın türünde', fb[2].topic === 'ekonomi' && topicName('ekonomi') === 'Ekonomi');
+check('yedek: işaretli ve kaynak adı', fb.every((x) => x.fallback && x.source === 'Bloomberg HT'));
+check('yedek akışlar farklı yayıncılardan', new Set(FALLBACK_FEEDS.map((f) => f.source)).size >= 5);
+
 if (process.argv.includes('--live')) {
+  for (const feed of FALLBACK_FEEDS) {
+    try {
+      const items = await fetchFallback(feed);
+      console.log(`\n== yedek ${feed.source} (${feed.name}): ${items.length} başlık, ${items.filter((i) => i.themes.length).length} etiketli`);
+      for (const it of items.slice(0, 3)) console.log(`   [${topicName(it.topic)}] ${it.title}`);
+    } catch (e) {
+      console.log(`== yedek ${feed.source}: HATA ${e}`);
+    }
+  }
   for (const topic of TOPICS) {
     try {
       const items = await fetchTopic(topic);

@@ -92,17 +92,35 @@ function tag(item: string, name: string): string {
   return m ? decode(m[1]) : '';
 }
 
-export async function rss(url: string): Promise<{ title: string; url: string; published: string | null }[]> {
-  const r = await fetch(url, { headers: UA });
-  if (!r.ok) throw new Error(`RSS HTTP ${r.status}`);
-  const xml = await r.text();
-  const out = [];
-  for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
+export interface RssItem { title: string; url: string; published: string | null }
+
+export function parseRss(xml: string): RssItem[] {
+  const out: RssItem[] = [];
+  for (const m of xml.matchAll(/<item(?:\s[^>]*)?>([\s\S]*?)<\/item>/g)) {
     const pub = tag(m[1], 'pubDate');
     const d = pub ? new Date(pub) : null;
     out.push({ title: tag(m[1], 'title'), url: tag(m[1], 'link'), published: d && !isNaN(+d) ? d.toISOString() : null });
   }
   return out;
+}
+
+const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+/** retries: geçici hatalarda (429, 5xx, ağ hatası) bekleyip yeniden dener (Google bazen bulut IP'lerine 503 döner). */
+export async function rss(url: string, retries = 0, waitMs = 1500): Promise<RssItem[]> {
+  for (let attempt = 0; ; attempt++) {
+    let status = 0;
+    try {
+      const r = await fetch(url, { headers: UA });
+      status = r.status;
+      if (r.ok) return parseRss(await r.text());
+    } catch (e) {
+      if (attempt >= retries) throw e;
+    }
+    const transient = status === 0 || status === 429 || status >= 500;
+    if (!transient || attempt >= retries) throw new Error(`RSS HTTP ${status}`);
+    await sleep(waitMs * (attempt + 1));
+  }
 }
 
 export async function fetchGoogleNewsTr(symbol: string, days = 2): Promise<NewsItem[]> {

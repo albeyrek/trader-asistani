@@ -1,5 +1,6 @@
 // Gündem: ülke ve dünya gündemi (para politikası, enflasyon, kur, siyaset, jeopolitik, emtia...) ve piyasaya etkisi.
-//  - Google Haberler'de konu aramaları (15 dakikada bir, konuların yarısı sırayla) -> başlıklar
+//  - Google Haberler'de konu aramaları (15 dakikada bir, konuların yarısı sırayla) -> başlıklar; Google'a
+//    ulaşılamazsa yayıncıların RSS akışları (FALLBACK_FEEDS)
 //  - kural tabanlı tema ve sektör etkisi (aşağıdaki PLAYBOOK; yapay zekâya bırakılmaz, uydurma riski olmasın)
 //  - politik risk göstergesi: siyasi gerilim başlıklarının yoğunluğu + dolar/TL, BIST 100 ve banka endeksinin günlük hareketi
 //  - yapay zekâ (Workers AI) birkaç saatte bir başlıkları temalara ayırıp özetler; sektör etkisini izinli listeden seçer
@@ -9,7 +10,7 @@
 import { AI_MODEL, MODEL_OPTIONS } from './assistant';
 import { trLower } from './classify';
 import type { Quote } from './quotes';
-import { rss } from './sources';
+import { rss, type RssItem } from './sources';
 
 // ------------------------------------------------------------------ sektörler
 
@@ -208,6 +209,8 @@ export interface AgendaItem {
   published: string | null;
   topic: string;
   themes: { theme: string; variant: string; tone: 1 | -1 }[];
+  /** Google'a ulaşılamadığında yedek akıştan geldi (politik risk sayacına katılmaz) */
+  fallback?: boolean;
 }
 
 /** Bir başlığın temaları (birden fazla olabilir). Her temada ilk eşleşen varyant seçilir (sıra önceliktir).
@@ -372,10 +375,10 @@ export function itemId(title: string): string {
   return (h >>> 0).toString(36);
 }
 
-/** Bir konunun son 1 günlük başlıkları. */
+/** Bir konunun son 1 günlük başlıkları (geçici hatada bir kez yeniden denenir). */
 export async function fetchTopic(topic: (typeof TOPICS)[number]): Promise<AgendaItem[]> {
   const q = encodeURIComponent(`${topic.q} when:1d`);
-  const items = await rss(`https://news.google.com/rss/search?q=${q}&hl=tr&gl=TR&ceid=TR:tr`);
+  const items = await rss(`https://news.google.com/rss/search?q=${q}&hl=tr&gl=TR&ceid=TR:tr`, 1);
   return items.slice(0, 40).map((it) => {
     const i = it.title.lastIndexOf(' - ');
     const title = i > 0 ? it.title.slice(0, i) : it.title;
@@ -384,6 +387,41 @@ export async function fetchTopic(topic: (typeof TOPICS)[number]): Promise<Agenda
       topic: topic.id, themes: classifyHeadline(title),
     };
   });
+}
+
+// Yedek kaynaklar: Google Haberler bulut IP'lerine zaman zaman 503 döndüğünde yayıncıların kendi RSS akışları
+// kullanılır (farklı yayın çizgilerinden). Konu araması olmadığı için konu, başlığın etiketlendiği temadan çıkarılır.
+export const FALLBACK_FEEDS: { id: string; name: string; source: string; url: string }[] = [
+  { id: 'ekonomi', name: 'Ekonomi', source: 'Bloomberg HT', url: 'https://www.bloomberght.com/rss/tum-haberler.xml' },
+  { id: 'ekonomi', name: 'Ekonomi', source: 'TRT Haber', url: 'https://www.trthaber.com/ekonomi_articles.rss' },
+  { id: 'ekonomi', name: 'Ekonomi', source: 'Habertürk', url: 'https://www.haberturk.com/rss/ekonomi.xml' },
+  { id: 'gundem', name: 'Gündem', source: 'Anadolu Ajansı', url: 'https://www.aa.com.tr/tr/rss/default?cat=guncel' },
+  { id: 'gundem', name: 'Gündem', source: 'Sözcü', url: 'https://www.sozcu.com.tr/feeds-rss-category-gundem' },
+  { id: 'dunya', name: 'Dünya', source: 'TRT Haber', url: 'https://www.trthaber.com/dunya_articles.rss' },
+];
+const TOPIC_IDS = new Set(TOPICS.map((t) => t.id));
+const FALLBACK_MAX_AGE_MS = 24 * 3600_000;
+
+/** Yedek akışın son 24 saatlik başlıkları; konu: başlığın ilk konu teması, yoksa akışın türü (ekonomi/gündem/dünya). */
+export function fallbackItems(feed: (typeof FALLBACK_FEEDS)[number], items: RssItem[], now = Date.now()): AgendaItem[] {
+  return items
+    .filter((it) => it.title && (!it.published || now - Date.parse(it.published) <= FALLBACK_MAX_AGE_MS))
+    .slice(0, 40)
+    .map((it) => {
+      const themes = classifyHeadline(it.title);
+      return {
+        id: itemId(it.title), title: it.title, source: feed.source, url: it.url, published: it.published,
+        topic: themes.find((t) => TOPIC_IDS.has(t.theme))?.theme ?? feed.id, themes, fallback: true,
+      };
+    });
+}
+
+export async function fetchFallback(feed: (typeof FALLBACK_FEEDS)[number]): Promise<AgendaItem[]> {
+  return fallbackItems(feed, await rss(feed.url, 1));
+}
+
+export function topicName(id: string): string {
+  return TOPICS.find((t) => t.id === id)?.name ?? FALLBACK_FEEDS.find((f) => f.id === id)?.name ?? id;
 }
 
 // ------------------------------------------------------------------ yapay zekâ özeti
@@ -406,7 +444,7 @@ const AI_SYSTEM = [
 ].join(' ');
 
 export function aiPrompt(items: AgendaItem[]): { role: 'system' | 'user'; content: string }[] {
-  const lines = items.slice(0, 60).map((it) => `- [${TOPICS.find((t) => t.id === it.topic)?.name ?? it.topic}] ${it.title} (${it.source})`);
+  const lines = items.slice(0, 60).map((it) => `- [${topicName(it.topic)}] ${it.title} (${it.source})`);
   return [{ role: 'system', content: AI_SYSTEM }, { role: 'user', content: lines.join('\n') }];
 }
 

@@ -120,7 +120,10 @@ def worker_checks() -> list[dict]:
         status = "error" if age > limit_min * 4 else "warn" if age > limit_min or err or unreachable else "ok"
         out.append(_check(cid, name, status, f"Son tur {age:.0f} dk önce" + (f"; hata: {str(err)[:80]}" if err else "")
                           + (f"; {part['failed']} kaynağın hiçbirine ulaşılamadı" if unreachable else "")
-                          + (f" ({part['fail_reason']})" if unreachable and part.get("fail_reason") else "")))
+                          + (f" ({part['fail_reason']})" if unreachable and part.get("fail_reason") else "")
+                          + ("; Google Haberler'e ulaşılamadı, yedek kaynaklar kullanıldı"
+                             if part.get("fallback") is not None and part.get("failed", 0) * 2 > 7 and not unreachable
+                             else "")))
     return out
 
 

@@ -22,7 +22,7 @@ import {
   type AiState, type AssistantData, type AssistantMarket, type Candidate,
 } from './assistant';
 import {
-  aiSummary, calendar, fetchTopic, politicalRisk, riskMessage, summarize, TOPICS,
+  aiSummary, calendar, FALLBACK_FEEDS, fetchFallback, fetchTopic, politicalRisk, riskMessage, summarize, TOPICS,
   type AgendaItem, type AiTheme, type PoliticalRisk,
 } from './agenda';
 import { answer, buildContext, referenceNumbers, verifyNumbers, type ChatRequest } from './chat';
@@ -42,6 +42,7 @@ const AGENDA_CRON = '7-59/15 * * * *';
 const AGENDA_KEEP_MS = 48 * 3600_000; // başlıklar 48 saat tutulur
 const POLITICAL_KEEP_MS = 7 * 86400_000; // siyasi gerilim başlıkları 7 gün (olağan seviye için)
 const AGENDA_AI_EVERY_MS = 3 * 3600_000; // yapay zekâ özeti en sık 3 saatte bir
+const AGENDA_PAUSE_MS = 300; // Google konu aramaları arasında kısa bekleme (art arda istek engellenmesin)
 const RISK_NOTIFY_EVERY_MS = 12 * 3600_000; // yüksek risk bildirimi en sık 12 saatte bir
 
 export interface Env {
@@ -442,7 +443,7 @@ interface AgendaState {
   risk?: PoliticalRisk & { at: string };
   riskNotifiedAt?: string;
   ai?: { at: string; n: number; themes: AiTheme[] };
-  last?: { at: string; fetched: number; fresh: number; failed: number; sent: number; error?: string; fail_reason?: string };
+  last?: { at: string; fetched: number; fresh: number; failed: number; sent: number; fallback?: number; error?: string; fail_reason?: string };
 }
 
 const EMPTY_AGENDA: AgendaState = { items: [], political: {}, cursor: 0 };
@@ -470,20 +471,45 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
   let fresh = 0;
   let failed = 0;
   let failReason: string | undefined;
-  for (const topic of group) {
+  let streak = 0; // art arda başarısız konu: Google bu turda engelliyorsa kalan konular denenmez (yükü artırmasın)
+  const add = (items: AgendaItem[]) => {
+    fetched += items.length;
+    for (const it of items) {
+      if (known.has(it.id)) continue;
+      known.add(it.id);
+      st.items.push({ ...it, seen: at });
+      fresh++;
+      // Politik risk sayacı yalnızca Google konu aramalarıyla beslenir: olağan seviye (7 günlük taban) aynı kaynak
+      // karışımıyla ölçülsün; yedek akışların farklı yoğunluğu sahte "yüksek risk" üretmesin
+      if (!it.fallback && it.themes.some((t) => t.theme === 'gerilim')) st.political[it.id] = Date.parse(it.published ?? at) || now;
+    }
+  };
+  for (const [i, topic] of group.entries()) {
+    if (streak >= 2) {
+      failed++;
+      continue;
+    }
+    if (i) await new Promise((res) => setTimeout(res, AGENDA_PAUSE_MS));
     try {
-      const items = await fetchTopic(topic);
-      fetched += items.length;
-      for (const it of items) {
-        if (known.has(it.id)) continue;
-        known.add(it.id);
-        st.items.push({ ...it, seen: at });
-        fresh++;
-        if (it.themes.some((t) => t.theme === 'gerilim')) st.political[it.id] = Date.parse(it.published ?? at) || now;
-      }
+      add(await fetchTopic(topic));
+      streak = 0;
     } catch (e) {
       failed++;
+      streak++;
       failReason ??= String(e).slice(0, 120);
+    }
+  }
+  // Google'ın yarısından fazlası alınamadıysa yayıncıların kendi akışları
+  let fallback = 0;
+  if (failed * 2 > group.length) {
+    for (const feed of FALLBACK_FEEDS) {
+      try {
+        const before = fresh;
+        add(await fetchFallback(feed));
+        fallback += fresh - before;
+      } catch {
+        // tek bir yayıncıya ulaşılamaması önemli değil
+      }
     }
   }
   st.items = st.items.filter((it) => now - Date.parse(it.published ?? it.seen) <= AGENDA_KEEP_MS);
@@ -531,7 +557,7 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
     }
   }
 
-  const last = { at, fetched, fresh, failed, sent, ...(failReason ? { fail_reason: failReason } : {}) };
+  const last = { at, fetched, fresh, failed, sent, fallback, ...(failReason ? { fail_reason: failReason } : {}) };
   st.last = last;
   await env.KV.put('agenda', JSON.stringify(st));
   return last;
