@@ -70,6 +70,7 @@ def prefilter(g: pd.DataFrame) -> pd.DataFrame:
         & (g["news_risk"] != "Yüksek")
         & (g["overall_risk"] != "Yüksek")
         & (g["alerts"].fillna("[]") == "[]")  # aşırı devre kesici, ciddi haber gibi uyarılar
+        & (g["date"] == g["date"].max())       # son işlem gününün fiyatı olmayan (eksik veri, işlem durdurma) aday olmaz
     )
     return g[m]
 

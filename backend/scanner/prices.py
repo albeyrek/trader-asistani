@@ -9,6 +9,11 @@ from .config import CHUNK_PAUSE_SEC, CHUNK_SIZE, DATA_DIR, HISTORY_PERIOD, UPDAT
 PRICE_FILE = DATA_DIR / "prices_daily.parquet"
 COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 BIST_SPLIT_GAP = -0.25
+# Yahoo toplu indirmede bazen bazı hisselerin son gününü göndermiyor (ör. 13 Kasım 2026'da ABD hisselerinin ~%37'si).
+# Son bir haftada işlem görmüş ama son işlem günü eksik hisseler kısa bir beklemeden sonra yeniden istenir.
+RETRY_PERIOD = "5d"
+RETRY_PAUSE_SEC = 10
+RETRY_RECENT_DAYS = 7
 
 
 def _download_chunk(symbols: list[str], period: str) -> pd.DataFrame:
@@ -65,6 +70,31 @@ def fix_bist_splits(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df[~bist], g], ignore_index=True)
 
 
+def missing_latest(df: pd.DataFrame, symbols: list[str]) -> list[str]:
+    """Piyasasının son işlem gününün fiyatı olmayan ama son RETRY_RECENT_DAYS günde işlem görmüş hisseler.
+    Endeks ve döviz kodları (^, =) hariç: döviz hafta sonu da işlem görüp "son günü" kaydırabiliyor."""
+    stocks = [s for s in symbols if not any(ch in s for ch in "^=")]
+    last = df[df["yf_symbol"].isin(stocks)].groupby("yf_symbol")["date"].max()
+    if last.empty:
+        return []
+    group = last.index.map(lambda s: "BIST" if s.endswith(".IS") else "US")
+    newest = last.groupby(group).transform("max")
+    return last[(last < newest) & (last >= newest - pd.Timedelta(days=RETRY_RECENT_DAYS))].index.tolist()
+
+
+def _retry_missing(df: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
+    missing = missing_latest(df, symbols)
+    if not missing:
+        return df
+    print(f"  {len(missing)} hissenin son işlem günü eksik; yeniden indiriliyor...")
+    time.sleep(RETRY_PAUSE_SEC)
+    fresh = download_prices(missing, RETRY_PERIOD)
+    if len(fresh):
+        df = pd.concat([df, fresh], ignore_index=True).drop_duplicates(["date", "yf_symbol"], keep="last")
+    print(f"  yeniden indirme sonrası hâlâ eksik: {len(missing_latest(df, symbols))}")
+    return df
+
+
 def update_prices(yf_symbols: list[str]) -> pd.DataFrame:
     """Dosya yoksa tüm geçmişi indirir; varsa sadece son dönemi çekip birleştirir."""
     if PRICE_FILE.exists():
@@ -78,6 +108,7 @@ def update_prices(yf_symbols: list[str]) -> pd.DataFrame:
         df = df.drop_duplicates(["date", "yf_symbol"], keep="last")
     else:
         df = download_prices(yf_symbols, HISTORY_PERIOD)
+    df = _retry_missing(df, yf_symbols)
     df = fix_bist_splits(df)
     df = df.sort_values(["yf_symbol", "date"]).reset_index(drop=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)

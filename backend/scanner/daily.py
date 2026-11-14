@@ -11,13 +11,19 @@ import time
 from . import events, export, fundamentals, news, scan, update_data
 
 
-def _run(step: str, fn, *args: str) -> None:
+def _run(step: str, fn, *args: str, optional: bool = False) -> None:
+    """optional=True: adım hata verirse uyarı yazılır ve önceki çalıştırmanın dosyasıyla devam edilir
+    (dış kaynak geçici olarak çökmüşse bütün tarama durmasın)."""
     print(f"\n========== {step} ==========", flush=True)
     t0 = time.time()
     saved = sys.argv
     sys.argv = [saved[0], *args]  # alt komutlar kendi argümanlarını sys.argv'den okur
     try:
         fn()
+    except Exception as exc:
+        if not optional:
+            raise
+        print(f"  ! {step} başarısız, önceki veriyle devam ediliyor: {exc!r}", flush=True)
     finally:
         sys.argv = saved
     print(f"({step}: {time.time() - t0:.0f} sn)", flush=True)
@@ -33,8 +39,8 @@ def main() -> None:
     _run("1/6 Veri güncelleme", update_data.main, *market)
     _run("2/6 Teknik tarama", scan.main, *market)
     _run("3/6 Haber ve KAP analizi", news.main)
-    _run("4/6 Bilanço takvimi", events.main)
-    _run("5/6 Temel veriler", fundamentals.main)
+    _run("4/6 Bilanço takvimi", events.main, optional=True)
+    _run("5/6 Temel veriler", fundamentals.main, optional=True)
     if args.export:
         _run("6/6 Dışa aktarma", export.main, "--out", args.export)
 

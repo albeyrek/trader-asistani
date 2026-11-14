@@ -17,6 +17,7 @@ from .config import HTTP_HEADERS
 KAP_URL = "https://www.kap.org.tr/tr/api/disclosure/members/byCriteria"
 KAP_LINK = "https://www.kap.org.tr/tr/Bildirim/{}"
 KAP_MAX_ROWS = 2000  # KAP tek sorguda en fazla bu kadar kayıt döndürüyor
+KAP_RETRY_WAITS = (3, 10)  # KAP sunucusu ara sıra 500 veriyor: bu kadar saniye bekleyip yeniden dene
 GOOGLE_NEWS_URL = "https://news.google.com/rss/search?q={q}&hl=tr&gl=TR&ceid=TR:tr"
 YAHOO_RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={s}&region=US&lang=en-US"
 IST = timezone(timedelta(hours=3))
@@ -41,18 +42,38 @@ def _kap_query(day_from: date, day_to: date) -> list[dict]:
     return r.json()
 
 
+def _kap_query_retry(day: date) -> list[dict] | None:
+    """Bir günün bildirimleri; KAP birkaç denemede de yanıt vermezse None."""
+    for wait in (*KAP_RETRY_WAITS, None):
+        try:
+            return _kap_query(day, day)
+        except (requests.RequestException, ValueError) as exc:
+            if wait is None:
+                print(f"  ! KAP {day}: {exc} (bu gün atlandı)")
+                return None
+            time.sleep(wait)
+    return None
+
+
 def fetch_kap(days: int = 30, today: date | None = None) -> list[dict]:
-    """Son `days` günün tüm KAP bildirimleri. Limit nedeniyle gün gün sorgulanır."""
+    """Son `days` günün tüm KAP bildirimleri. Limit nedeniyle gün gün sorgulanır.
+    KAP hata verirse o gün atlanır; haber analizi diğer günler ve kaynaklarla devam eder."""
     today = today or date.today()
     items = []
+    failed = 0
     for i in range(days):
         day = today - timedelta(days=i)
-        rows = _kap_query(day, day)
+        rows = _kap_query_retry(day)
+        if rows is None:
+            failed += 1
+            continue
         if len(rows) >= KAP_MAX_ROWS:
             print(f"  ! KAP {day}: {KAP_MAX_ROWS} kayıt sınırına ulaşıldı, bazı bildirimler eksik olabilir")
         for x in rows:
             items.extend(_kap_to_items(x))
         time.sleep(REQUEST_PAUSE_SEC)
+    if failed:
+        print(f"  ! KAP: {failed}/{days} gün alınamadı")
     return items
 
 
