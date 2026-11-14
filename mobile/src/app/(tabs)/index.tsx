@@ -50,6 +50,12 @@ export default function AssistantScreen() {
         onChange={setPicked}
       />
       <View style={{ height: 12 }} />
+      <Pressable onPress={() => router.push({ pathname: '/chat', params: { market } })}
+        style={[styles.ask, { backgroundColor: t.card, borderColor: t.accent }]} accessibilityRole="button">
+        <Ionicons name="chatbubbles-outline" size={20} color={t.accent} />
+        <Text style={{ color: t.muted, fontSize: 14, flex: 1 }}>Asistana sor: “Bugün ne alayım?”, “THYAO alayım mı?”…</Text>
+        <Ionicons name="chevron-forward" size={16} color={t.muted} />
+      </Pressable>
       <AgendaCard agenda={agenda.data} />
       {!data ? (
         <StateView loading={loading} error={error} empty="Asistan verisi henüz yok." onRetry={reload} />
@@ -269,6 +275,10 @@ const styles = StyleSheet.create({
   trade: { flexDirection: 'row', gap: 10, paddingVertical: 5, borderTopWidth: StyleSheet.hairlineWidth },
   tradeR: { width: 56, textAlign: 'right', fontVariant: ['tabular-nums'] },
   disclaimer: { fontSize: 11, textAlign: 'center', lineHeight: 16, marginTop: 4 },
+  ask: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 14, borderWidth: 1, paddingHorizontal: 14,
+    paddingVertical: 12, marginBottom: 12,
+  },
   tmLink: {
     flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth,
     padding: 14, marginBottom: 12,

@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -44,12 +44,20 @@ export default function StockScreen() {
         title: symbol,
         headerRight: () =>
           s ? (
-            <Pressable
-              onPress={() => toggleWatch({ symbol: s.symbol, market: s.market })}
-              hitSlop={10}
-              accessibilityLabel={watched ? 'İzleme listesinden çıkar' : 'İzleme listesine ekle'}>
-              <Ionicons name={watched ? 'star' : 'star-outline'} size={22} color={watched ? t.warn : t.text} />
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: 18 }}>
+              <Pressable
+                onPress={() => router.push({ pathname: '/chat', params: { symbol: s.symbol, market: s.market } })}
+                hitSlop={10}
+                accessibilityLabel="Bu hisseyi asistana sor">
+                <Ionicons name="chatbubbles-outline" size={22} color={t.accent} />
+              </Pressable>
+              <Pressable
+                onPress={() => toggleWatch({ symbol: s.symbol, market: s.market })}
+                hitSlop={10}
+                accessibilityLabel={watched ? 'İzleme listesinden çıkar' : 'İzleme listesine ekle'}>
+                <Ionicons name={watched ? 'star' : 'star-outline'} size={22} color={watched ? t.warn : t.text} />
+              </Pressable>
+            </View>
           ) : null,
       }}
     />

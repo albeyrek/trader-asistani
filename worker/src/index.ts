@@ -7,6 +7,7 @@
 //  - GET  /api/assistant : günün alım adayları + yapay zekâ yorumları
 //  - 10 dakikada bir (ayrı cron): yeni aday listesi için Workers AI yorumu, ardından liste bildirimi
 //  - GET  /api/agenda    : gündem (temalar, sektör etkisi, politik risk, yapay zekâ özeti, takvim)
+//  - POST /api/chat      : sohbet asistanı (soruyu uygulamanın verisiyle cevaplar; günlük sınır)
 //  - 15 dakikada bir (ayrı cron): gündem başlıkları, politik risk; risk yükselince bildirim
 // Haber mantığı backend/scanner/watch.py ile aynıdır; kurallar ve eşikler GitHub Pages'teki watch_meta.json'dan gelir.
 
@@ -23,6 +24,7 @@ import {
   aiSummary, calendar, fetchTopic, politicalRisk, riskMessage, summarize, TOPICS,
   type AgendaItem, type AiTheme, type PoliticalRisk,
 } from './agenda';
+import { answer, buildContext, type ChatRequest } from './chat';
 import { fetchQuote, yahooSymbol, type Market, type Quote } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
 
@@ -550,6 +552,63 @@ function agendaResponse(st: AgendaState | null): unknown {
   };
 }
 
+// ------------------------------------------------------------------ sohbet
+
+const CHAT_DAILY_LIMIT = 40; // istemci (bildirim adresi ya da IP) başına günlük mesaj
+const CHAT_MAX_MESSAGES = 20;
+const CHAT_MAX_CHARS = 2000;
+
+/** Günlük sayaç Cloudflare önbelleğinde tutulur (KV'nin günlük 1000 yazma sınırı harcanmasın). Kesin değil ama
+ *  ücretsiz yapay zekâ kotasını kötüye kullanıma karşı korumaya yeter. */
+async function chatQuota(client: string): Promise<boolean> {
+  const day = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+  const key = new Request(`https://quota.local/chat/${day}/${encodeURIComponent(client)}`);
+  const cache = caches.default;
+  const hit = await cache.match(key);
+  const used = hit ? Number(await hit.text()) || 0 : 0;
+  if (used >= CHAT_DAILY_LIMIT) return false;
+  await cache.put(key, new Response(String(used + 1), { headers: { 'Cache-Control': 'max-age=90000' } }));
+  return true;
+}
+
+async function chatEndpoint(req: Request, env: Env): Promise<Response> {
+  let body: ChatRequest;
+  try {
+    body = (await req.json()) as ChatRequest;
+  } catch {
+    return json({ detail: 'Geçersiz JSON' }, 400);
+  }
+  const msgs = Array.isArray(body.messages) ? body.messages : [];
+  const clean = msgs.slice(-CHAT_MAX_MESSAGES)
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string' && m.content.trim())
+    .map((m) => ({ role: m.role, content: m.content.slice(0, CHAT_MAX_CHARS) }));
+  if (!clean.length || clean[clean.length - 1].role !== 'user') return json({ detail: 'Soru bulunamadı' }, 422);
+  const token = typeof body.token === 'string' && TOKEN_RE.test(body.token) ? body.token : null;
+  const client = token ?? req.headers.get('CF-Connecting-IP') ?? 'bilinmiyor';
+  if (!(await chatQuota(client))) {
+    return json({ detail: `Günlük ${CHAT_DAILY_LIMIT} soru sınırına ulaşıldı; yarın tekrar deneyin.` }, 429);
+  }
+  const request: ChatRequest = {
+    messages: clean,
+    symbol: typeof body.symbol === 'string' && SYMBOL_RE.test(body.symbol) ? body.symbol : undefined,
+    market: body.market === 'BIST' || body.market === 'US' ? body.market : undefined,
+    portfolio: Array.isArray(body.portfolio) ? body.portfolio.slice(0, 30).filter((p) => p && SYMBOL_RE.test(String(p.symbol))
+      && (p.market === 'BIST' || p.market === 'US') && Number.isFinite(Number(p.qty)) && Number.isFinite(Number(p.cost)))
+      .map((p) => ({ symbol: String(p.symbol), market: p.market, qty: Number(p.qty), cost: Number(p.cost) })) : undefined,
+  };
+  const agendaState = await env.KV.get<AgendaState>('agenda', 'json');
+  const agenda = agendaState ? (agendaResponse(agendaState) as Record<string, unknown>) : null;
+  const { context, sources } = await buildContext(request, env.DATA_URL, agenda);
+  let text: string | null = null;
+  try {
+    text = await answer(env.AI, request, context);
+  } catch (e) {
+    return json({ detail: `Yapay zekâ şu an cevap veremedi (${String(e).slice(0, 80)}). Biraz sonra tekrar deneyin.` }, 503);
+  }
+  if (!text) return json({ detail: 'Yapay zekâ boş cevap döndü; soruyu farklı sormayı deneyin.' }, 503);
+  return json({ answer: text, sources, model: AI_MODEL });
+}
+
 // ------------------------------------------------------------------ asistan
 
 function ageDays(isoDate: string, now = Date.now()): number {
@@ -636,6 +695,7 @@ export default {
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' },
       });
     }
+    if (url.pathname === '/api/chat' && req.method === 'POST') return chatEndpoint(req, env);
     if (url.pathname === '/api/agenda') {
       const st = await env.KV.get<AgendaState>('agenda', 'json');
       return new Response(JSON.stringify(agendaResponse(st)), {
