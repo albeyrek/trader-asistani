@@ -132,6 +132,19 @@ def time_machine(year: str):
     return tm[year]
 
 
+@app.get("/api/us_strategy")
+def us_strategy_view():
+    """ABD strateji araştırması (bulutta us_strategy.json)."""
+    from scanner import us_strategy
+    rep = json.loads(us_strategy.REPORT_JSON.read_text(encoding="utf-8")) if us_strategy.REPORT_JSON.exists() else None
+    prices = _load(PRICE_FILE)
+    return {"recommended": us_strategy.RECOMMENDED, "experiment": us_strategy.EXPERIMENT,
+            "current": us_strategy.current_portfolio(prices, us_strategy.EXPERIMENT), "forward": us_strategy.forward(prices),
+            "report": {k: {kk: vv for kk, vv in v.items() if kk != "curve"} for k, v in rep["strategies"].items()} if rep else None,
+            "curves": {k: rep["strategies"][k]["curve"] for k in (us_strategy.RECOMMENDED, us_strategy.EXPERIMENT)
+                       if rep and k in rep["strategies"]}}
+
+
 @app.get("/api/paper")
 def paper_portfolio():
     """Sanal portföy (bulutta paper.json): canlı + 2018'den beri test."""

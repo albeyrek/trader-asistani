@@ -51,7 +51,9 @@ def _backtest_summary(market: str) -> dict | None:
     pct = lambda v: f"%{v:.1f}".replace(".", ",")  # noqa: E731
     note = (f"Uyarı: 2018'den beri test portföyünde bu strateji {('BIST 100' if market == 'BIST' else 'S&P 500')}'ün "
             f"belirgin gerisinde kaldı (yıllık {pct(r['cagr_pct'])}, endeks {pct(r['index_cagr_pct'])}); önerileri bir "
-            "sistem olarak takip etmek yerine fikir listesi olarak kullanın.") if lagging else None
+            "sistem olarak takip etmek yerine fikir listesi olarak kullanın."
+            + (" Araştırmada risk/getiri açısından en iyisi S&P 500'ü bir endeks fonuyla tutmak çıktı (ayrıntı: "
+               "“ABD için strateji” kartı)." if market == "US" else "")) if lagging else None
     return {"cagr_pct": r["cagr_pct"], "index_cagr_pct": r["index_cagr_pct"], "max_dd_pct": r["max_dd_pct"],
             "lagging": lagging, "note": note}
 

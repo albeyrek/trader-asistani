@@ -597,3 +597,29 @@ export interface PaperReport {
   settings: { capital: Record<Market, number>; risk_pct: number; max_positions: number; cost_pct: Record<Market, number>;
     participation_pct: number };
 }
+
+// ------------------------------------------------------------------ ABD strateji araştırması (backend/scanner/us_strategy.py)
+
+export interface UsStrategyStats {
+  desc: string;
+  cagr: number;
+  index_cagr: number;
+  total: number;
+  index_total: number;
+  max_dd: number;
+  index_max_dd: number;
+  sharpe: number | null;
+  invested: number;
+  beat_years: number;
+  years: number;
+  by_year: Record<string, { p: number; i: number }>;
+}
+
+export interface UsStrategy {
+  recommended: string;
+  experiment: string;
+  current: { strategy: string; desc: string; date: string; in_market: boolean; holdings: { yf: string; symbol: string; score: number }[] };
+  forward: { start: string; end: string; return_pct: number; index_return_pct: number; curve: [string, number, number][]; holdings: string[] } | null;
+  report: Record<string, UsStrategyStats> | null;
+  curves: Record<string, [string, number, number][]>;
+}

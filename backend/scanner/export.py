@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
-from . import assistant, assistant_track, exits, learn, paper, scorecard, views
+from . import assistant, assistant_track, exits, learn, paper, scorecard, us_strategy, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -141,6 +141,26 @@ def export(out: Path) -> None:
     # Öğrenen model: nasıl öğrendiği, test sonuçları, neye baktığı (haftalık eğitim: scanner/learn.py)
     if learn.META_FILE.exists():
         _write(data / "model.json", json.loads(learn.META_FILE.read_text(encoding="utf-8")))
+    # ABD strateji araştırması: karşılaştırma (haftalık öğrenmede), deneysel momentum portföyünün bugünkü hisseleri ve
+    # canlı testi (her gün)
+    try:
+        us_rep = json.loads(us_strategy.REPORT_JSON.read_text(encoding="utf-8")) if us_strategy.REPORT_JSON.exists() else None
+        sym_of = {r.yf_symbol: r.symbol for r in scan[scan["market"] == "US"].itertuples()}
+        cur = us_strategy.current_portfolio(all_prices, us_strategy.EXPERIMENT)
+        for h in cur["holdings"]:
+            h["symbol"] = sym_of.get(h["yf"], h["yf"].replace("-", "."))
+        fwd = us_strategy.forward(all_prices)
+        if fwd:
+            fwd["holdings"] = [sym_of.get(y, y.replace("-", ".")) for y in fwd["holdings"]]
+        _write(data / "us_strategy.json", {
+            "recommended": us_strategy.RECOMMENDED, "experiment": us_strategy.EXPERIMENT, "current": cur, "forward": fwd,
+            "report": {k: {kk: vv for kk, vv in v.items() if kk != "curve"} for k, v in us_rep["strategies"].items()}
+            if us_rep else None,
+            "curves": {k: us_rep["strategies"][k]["curve"] for k in (us_strategy.RECOMMENDED, us_strategy.EXPERIMENT)
+                       if us_rep and k in us_rep["strategies"]},
+        })
+    except Exception as exc:  # araştırma çıktısı ana dışa aktarmayı durdurmasın
+        print(f"  ! ABD strateji çıktısı: {exc!r}")
     # Çıkış kuralları karşılaştırması (haftalık öğrenmede güncellenir: scanner/exits.py)
     if exits.REPORT_JSON.exists():
         rep = json.loads(exits.REPORT_JSON.read_text(encoding="utf-8"))

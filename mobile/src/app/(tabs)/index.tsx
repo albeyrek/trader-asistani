@@ -8,6 +8,7 @@ import { CandidateCard, rText, zoneStatus } from '@/components/CandidateCard';
 import { ExitsCard } from '@/components/ExitsCard';
 import { ModelCard } from '@/components/ModelCard';
 import { PaperCard } from '@/components/PaperCard';
+import { UsStrategyCard } from '@/components/UsStrategyCard';
 import { Card, Chip, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
@@ -18,6 +19,7 @@ import type {
   Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, ExitsReport, Market, ModelMeta, PaperReport,
   StockSummary,
   TradeStatus,
+  UsStrategy,
 } from '@/lib/types';
 
 /** "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop] */
@@ -34,6 +36,7 @@ export default function AssistantScreen() {
   const agenda = useApi<Agenda>('/api/agenda');
   const exitsRep = useApi<ExitsReport>('/api/exits');
   const paperRep = useApi<PaperReport>('/api/paper');
+  const usStrat = useApi<UsStrategy>(market === 'US' ? '/api/us_strategy' : null);
   const mk = data?.markets[market];
   const quotes = useQuotes(mk?.candidates ?? []);
 
@@ -56,6 +59,7 @@ export default function AssistantScreen() {
         <>
           <StanceCard mk={mk} market={market} />
           <PaperCard rep={paperRep.data} market={market} />
+          {market === 'US' ? <UsStrategyCard data={usStrat.data} /> : null}
           {mk.candidates.map((c) => (
             <CandidateCard key={c.symbol} c={c} quote={quotes[quoteKey(c.symbol, c.market)]} riskScale={mk.risk_scale} />
           ))}

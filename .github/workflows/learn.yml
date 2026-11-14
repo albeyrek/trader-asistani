@@ -58,6 +58,10 @@ jobs:
       - name: Sanal portfoy testi
         run: python -m scanner.paper --backtest
 
+      # ABD strateji karşılaştırması (momentum çeşitleri ve endeks, 2018'den beri)
+      - name: ABD strateji arastirmasi
+        run: python -m scanner.us_strategy
+
       - name: Disa aktarma
         run: python -m scanner.export --out ../site
 
