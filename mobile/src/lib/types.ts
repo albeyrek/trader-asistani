@@ -280,6 +280,10 @@ export interface Candidate {
   commentary: string; // kural tabanlı yorum
   ai?: string; // yapay zekâ yorumu (bulut bekçisi ekler)
   model?: ModelPrediction | null;
+  /** Çıkış kuralı (10 yıllık testte seçildiyse; yoksa sabit hedefli plan) */
+  exit_rule?: { name: string; target: number | null; hold: number; trail?: number } | null;
+  exit_note?: string | null;
+  atr?: number;
 }
 
 /** Öğrenen modelin aday için tahmini (backend/scanner/learn.py). */
@@ -319,7 +323,7 @@ export interface AssistantData {
   ai_model?: string | null;
 }
 
-export type TradeStatus = 'pending' | 'not_filled' | 'open' | 'target' | 'stop' | 'timeout';
+export type TradeStatus = 'pending' | 'not_filled' | 'open' | 'target' | 'stop' | 'timeout' | 'trail';
 
 export interface AssistantTrade {
   date: string;
@@ -345,6 +349,7 @@ export interface AssistantScoreMarket {
   closed: number;
   targets: number;
   stops: number;
+  trails?: number; // iz süren stopla kârla çıkış
   timeouts: number;
   win_rate: number | null;
   avg_r: number | null;
@@ -532,3 +537,24 @@ export const SECTOR_NAMES: Record<string, string> = {
   metal: 'Metal ve demir-çelik', gida: 'Gıda', perakende: 'Perakende', iletisim: 'İletişim', savunma: 'Savunma',
   insaat: 'İnşaat ve çimento', sigorta: 'Sigorta', otomotiv: 'Otomotiv', altin: 'Altın ve madencilik', genel: 'Borsa geneli',
 };
+
+/** Çıkış kuralları karşılaştırması (backend/scanner/exits.py; canlı süzgeçten geçen girişler). */
+export interface ExitPolicyStats {
+  desc: string;
+  n: number;
+  avg_r: number;
+  median_r: number;
+  win: number;
+  avg_days: number;
+  r_per_20d: number;
+  top5_r: number;
+}
+
+export interface ExitsReport {
+  generated_at: string;
+  selected: Partial<Record<Market, { name: string; desc: string; avg_r: number; base_avg_r: number; oos_r: number | null;
+    oos_base_r: number | null; win: number; avg_days: number; n: number }>>;
+  policies: Partial<Record<Market | 'ALL', Record<string, ExitPolicyStats>>>;
+  walk_forward: Partial<Record<Market | 'ALL', { years: { year: number; chosen: string; chosen_r: number; base_r: number; n: number;
+    best_in_hindsight: string }[]; oos_chosen_r: number | null; oos_base_r: number | null }>>;
+}

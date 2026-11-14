@@ -246,10 +246,17 @@ def commentary(c: dict, regime: dict) -> str:
     news = next((x for x in c["checks"] if x["label"] == "Haberler"), None)
     if news:
         p.append(news["text"] + ".")
-    p.append(f"Plan: {_fmt(c['entry_low'])}–{_fmt(c['entry_high'])} aralığında alım, günlük kapanış "
-             f"{_fmt(c['stop'])} altına inerse çıkış (risk {_pct(c['risk_pct'])}); ilk hedef {_fmt(c['target1'])}, "
-             f"ikinci hedef {_fmt(c['target2'])}.")
-    if c["projected"]:
+    rule = c.get("exit_rule")
+    if rule and rule.get("trail"):
+        p.append(f"Plan: {_fmt(c['entry_low'])}–{_fmt(c['entry_high'])} aralığında alım, günlük kapanış "
+                 f"{_fmt(c['stop'])} altına inerse çıkış (risk {_pct(c['risk_pct'])}). Sabit hedef yok: fiyat yükseldikçe "
+                 f"stop, en yüksek kapanışın {_fmt(rule['trail'] * c['atr'])} ({rule['trail']:g} ATR) altına çekilir; "
+                 f"en çok {rule['hold']} gün. {_fmt(c['target1'])} ilk direnç olarak izlenebilir.")
+    else:
+        p.append(f"Plan: {_fmt(c['entry_low'])}–{_fmt(c['entry_high'])} aralığında alım, günlük kapanış "
+                 f"{_fmt(c['stop'])} altına inerse çıkış (risk {_pct(c['risk_pct'])}); ilk hedef {_fmt(c['target1'])}, "
+                 f"ikinci hedef {_fmt(c['target2'])}.")
+    if c["projected"] and not (rule and rule.get("trail")):
         p.append("Fiyat zirve bölgesinde ve üstte direnç yok; hedefler stop mesafesinin katları olarak hesaplandı.")
     ev = next((x for x in c["checks"] if x["label"] == "Bilanço"), None)
     if ev:
@@ -305,7 +312,7 @@ def _stance(regime: dict, n: int, market: str, model_rejected: int = 0) -> str:
 def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData",
                agenda: dict | None = None) -> dict:
     """Piyasa başına günün adayları. scan: SideData ile zenginleştirilmiş tarama. agenda: fetch_agenda() çıktısı."""
-    from . import learn  # learn bu modülü kullanıyor (döngüsel içe aktarma olmasın)
+    from . import exits, learn  # bu modülü kullanıyorlar (döngüsel içe aktarma olmasın)
     scorer = learn.Scorer(prices, scan)
     risk = (agenda or {}).get("risk")
     impacts = {s["sector"]: s for s in (agenda or {}).get("sectors", [])}
@@ -315,6 +322,13 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         if not mk:
             continue
         regime = {k: mk["regime"][k] for k in ("label", "score", "summary")}
+        # Çıkış kuralı: 10 yıllık testte temel plandan anlamlı iyi olan kural (yoksa temel plan; bkz. exits.py)
+        exit_sel = exits.selected_rule(market)
+        exit_rule = {k: exit_sel[k] for k in ("name", "target", "hold", "trail", "breakeven", "partial") if k in exit_sel} \
+            if exit_sel else None
+        exit_note = (f"{exit_sel['desc']}. 10 yıllık testte işlem başına ortalama {_r(exit_sel['avg_r'])} (sabit hedefli "
+                     f"plan {_r(exit_sel['base_avg_r'])}); her yıl yalnızca önceki yıllara bakarak seçildiğinde de "
+                     f"{_r(exit_sel['oos_r'])} (plan {_r(exit_sel['oos_base_r'])}).") if exit_sel else None
         limit, scale = REGIME_LIMITS[regime["label"]]
         # Strateji formu: planlar son haftalarda zarar ettirdiyse liste kısalır, pozisyon küçülür
         form = scorer.form(market)
@@ -372,6 +386,9 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
                 "fundamentals": {k: (side.fund.get(key) or {}).get(k) for k in ("pe", "pb", "market_cap")},
                 "model": model,
             }
+            if exit_rule:
+                c["exit_rule"] = exit_rule
+                c["exit_note"] = exit_note
             c["quality"] = _quality(r, plan, checks)
             rows.append(c)
         min_rs = BEAR_MIN_RS if regime["label"] in ("Zayıf", "Ayı") else MIN_RS
@@ -410,11 +427,13 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
 
 def build(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData",
           generated_at: pd.Timestamp) -> dict:
-    markets = candidates(scan, prices, overview, side, fetch_agenda())
+    agenda = fetch_agenda()
+    markets = candidates(scan, prices, overview, side, agenda)
     # Sürüm: bulut bekçisi yeni liste geldiğini buradan anlar (yapay zekâ yorumu ve bildirim için)
     version = "|".join(f"{m}:{v['date']}:" + ",".join(c["symbol"] for c in v["candidates"])
                        for m, v in sorted(markets.items()))
     return {
+        "agenda_snapshot": agenda,  # export günlük arşive yazar (uygulamaya gönderilmeden önce çıkarılır)
         "version": version,
         "generated_at": generated_at.isoformat(),
         "markets": markets,

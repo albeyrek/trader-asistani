@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
-from . import assistant, assistant_track, learn, scorecard, views
+from . import assistant, assistant_track, exits, learn, scorecard, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -49,6 +49,28 @@ def _list(df: pd.DataFrame, total: int | None = None) -> dict:
     """total: listenin kesilmeden önceki boyu (uygulama '470 hisse' gibi gösterir)."""
     return {"total": len(df) if total is None else total,
             "items": [views.row(r, views.LIST_FIELDS) for _, r in df.iterrows()]}
+
+
+AGENDA_ARCHIVE = DATA_DIR / "agenda_history.json"
+AGENDA_KEEP_DAYS = 800
+
+
+def archive_agenda(agenda: dict | None, day: str) -> None:
+    """Gündemin günlük özeti saklanır (haber geçmişi olmadığı için model şimdilik öğrenemiyor; birkaç ay sonra
+    öğrenebilsin diye bugünden itibaren biriktirilir). Aynı gün tekrar çalışırsa güncellenir."""
+    if not agenda:
+        return
+    hist = json.loads(AGENDA_ARCHIVE.read_text(encoding="utf-8")) if AGENDA_ARCHIVE.exists() else []
+    risk = agenda.get("risk") or {}
+    entry = {
+        "date": day, "risk_score": risk.get("score"), "risk_level": risk.get("level"),
+        "risk_components": risk.get("components"),
+        "themes": {t["theme"]: {"count": t["count"], "tone": t["tone"]} for t in agenda.get("themes", [])},
+        "sectors": {s["sector"]: s["score"] for s in agenda.get("sectors", [])},
+        "ai_titles": [t["title"] for t in (agenda.get("ai") or {}).get("themes", [])],
+    }
+    hist = [h for h in hist if h["date"] != day] + [entry]
+    AGENDA_ARCHIVE.write_text(json.dumps(hist[-AGENDA_KEEP_DAYS:], ensure_ascii=False), encoding="utf-8")
 
 
 def export(out: Path) -> None:
@@ -102,6 +124,8 @@ def export(out: Path) -> None:
     _write(data / "market.json", overview)
     # Asistan: günün alım adayları ve işlem planları; geçmiş adayların sonucu (asistan karnesi)
     asst = assistant.build(scan, all_prices, overview, side, updated)
+    archive_agenda(asst.get("agenda_snapshot"), str(scan["date"].max()))
+    asst.pop("agenda_snapshot", None)
     _write(data / "assistant.json", asst)
     yf_of = {f"{r.market}:{r.symbol}": r.yf_symbol for r in scan.itertuples()}
     a_hist = assistant_track.record(assistant_track.load_history(), asst, yf_of)
@@ -111,6 +135,11 @@ def export(out: Path) -> None:
     # Öğrenen model: nasıl öğrendiği, test sonuçları, neye baktığı (haftalık eğitim: scanner/learn.py)
     if learn.META_FILE.exists():
         _write(data / "model.json", json.loads(learn.META_FILE.read_text(encoding="utf-8")))
+    # Çıkış kuralları karşılaştırması (haftalık öğrenmede güncellenir: scanner/exits.py)
+    if exits.REPORT_JSON.exists():
+        rep = json.loads(exits.REPORT_JSON.read_text(encoding="utf-8"))
+        _write(data / "exits.json", {"generated_at": rep["generated_at"], "selected": rep.get("selected", {}),
+                                     "policies": rep["policies"]["live"], "walk_forward": rep["walk_forward"]["live"]})
     # Zaman makinesi: geçmiş haftalarda asistanın seçimleri ve sonuçları (yıl başına bir dosya)
     if learn.TIMEMACHINE_FILE.exists():
         tm = json.loads(learn.TIMEMACHINE_FILE.read_text(encoding="utf-8"))

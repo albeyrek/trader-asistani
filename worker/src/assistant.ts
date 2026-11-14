@@ -40,6 +40,8 @@ export interface Candidate {
   earnings_date: string | null;
   earnings_status: string | null;
   commentary: string;
+  /** Çıkış kuralı notu (10 yıllık testte seçilen kural; yoksa sabit hedefli plan) */
+  exit_note?: string | null;
   /** Öğrenen modelin tahmini (backend/scanner/learn.py); model henüz eğitilmediyse yok */
   model?: {
     p: number; // ilk hedefe stoptan önce ulaşma olasılığı (0-1)
@@ -146,6 +148,7 @@ export function buildPrompt(c: Candidate, mk: AssistantMarket): { role: 'system'
       `1. hedef ${p(c.target1)}; 2. hedef ${p(c.target2)}; ödül/risk ${c.rr.toFixed(1).replace('.', ',')}` +
       (c.projected ? ' (fiyat zirvede, üstte direnç yok; hedefler stop mesafesinin katları)' : ''),
     c.earnings_date ? `Bilanço tarihi: ${c.earnings_date}${c.earnings_status === 'estimated' ? ' (tahmini)' : ''}` : '',
+    c.exit_note ? `Çıkış kuralı: ${c.exit_note} Hedefleri sabit hedef gibi anlatma; iz süren stopu açıkla.` : '',
     c.model
       ? 'Geçmiş verilerle eğitilen modelin tahmini: ' +
         `ilk hedefe stoptan önce ulaşma olasılığı %${Math.round(c.model.p * 100)}` +

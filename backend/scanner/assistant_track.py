@@ -24,6 +24,7 @@ MAX_HOLD = 20
 MAX_SNAPSHOTS = 400
 RECENT_TRADES = 30
 PLAN_FIELDS = ("symbol", "setup", "entry_low", "entry_high", "stop", "target1", "close", "rr")
+OPTIONAL_FIELDS = ("atr", "exit_rule")  # eski kayıtlarda yok
 
 
 def load_history() -> list[dict]:
@@ -50,49 +51,81 @@ def record(history: list[dict], assistant: dict, yf_of: dict[str, str]) -> list[
     """Bugünün adaylarını ekler; aynı (piyasa, tarih) varsa yeniler. yf_of: "PİYASA:KOD" -> yahoo kodu."""
     for market, v in assistant["markets"].items():
         snap = {"market": market, "date": v["date"], "regime": v["regime"]["label"],
-                "candidates": [{**{k: c[k] for k in PLAN_FIELDS}, "yf": yf_of.get(f"{market}:{c['symbol']}")}
+                "candidates": [{**{k: c[k] for k in PLAN_FIELDS}, **{k: c[k] for k in OPTIONAL_FIELDS if k in c},
+                                "yf": yf_of.get(f"{market}:{c['symbol']}")}
                                for c in v["candidates"]]}
         history = [h for h in history if not (h["market"] == market and h["date"] == v["date"])] + [snap]
     history.sort(key=lambda h: (h["date"], h["market"]))
     return history[-MAX_SNAPSHOTS:]
 
 
+BASE_RULE = {"name": "base", "target": "plan", "hold": MAX_HOLD}
+
+
+def run_exit(o, h, l, c, fill_i: int, fill: float, stop: float, target: float | None, hold: int, atr: float,
+             trail: float | None = None, breakeven: float | None = None, partial: float | None = None):
+    """Bir pozisyonun çıkışı: (R, tutulan gün, çıkış fiyatı, nasıl: "stop" | "target" | "end").
+    trail: iz süren stop (en yüksek kapanış - trail x ATR); breakeven: bu kadar R kârda stop girişe çekilir;
+    partial: pozisyonun yarısı bu kadar R kârda kapatılır. Aynı gün hem stop hem hedef olursa temkinli olarak stop."""
+    risk = fill - stop
+    end = min(len(c), fill_i + hold)
+    cur_stop, peak, r_locked, weight, half_done = stop, fill, 0.0, 1.0, False
+    for t in range(fill_i, end):
+        first = t == fill_i
+        if trail:
+            cur_stop = max(cur_stop, peak - trail * atr)
+        if l[t] <= cur_stop:
+            px = o[t] if (not first and o[t] < cur_stop) else cur_stop
+            return r_locked + weight * (px - fill) / risk, t - fill_i + 1, px, "stop"
+        if partial and not half_done and h[t] >= fill + partial * risk:
+            r_locked, weight, half_done = 0.5 * partial, 0.5, True
+        if target is not None and h[t] >= target:
+            px = o[t] if (not first and o[t] > target) else target
+            return r_locked + weight * (px - fill) / risk, t - fill_i + 1, px, "target"
+        if breakeven and h[t] >= fill + breakeven * risk:
+            cur_stop = max(cur_stop, fill)
+        peak = max(peak, c[t])
+    t = end - 1
+    return r_locked + weight * (c[t] - fill) / risk, end - fill_i, c[t], "end"
+
+
 def simulate(c: dict, bars: pd.DataFrame) -> dict:
-    """bars: sinyal gününden SONRAKİ günlük mumlar (date, open, high, low, close), eskiden yeniye."""
-    lo, hi, stop, t1 = c["entry_low"], c["entry_high"], c["stop"], c["target1"]
+    """bars: sinyal gününden SONRAKİ günlük mumlar (date, open, high, low, close), eskiden yeniye.
+    c["exit_rule"] yoksa temel plan (ilk hedef, MAX_HOLD gün) uygulanır."""
+    rule = c.get("exit_rule") or BASE_RULE
+    lo, hi, stop = c["entry_low"], c["entry_high"], c["stop"]
     out = {"status": "pending", "days": 0, "r": None, "fill": None, "exit": None, "exit_date": None}
+    o, h, l, cl = (bars[k].to_numpy(dtype=float) for k in ("open", "high", "low", "close"))
+    dates = bars["date"].to_numpy()
     fill_i = None
-    for i, b in enumerate(bars.head(ENTRY_DAYS).itertuples()):
-        if b.low <= hi and b.high >= lo:
-            fill = min(max(b.open, lo), hi)
-            fill_i, out["fill"] = i, round(float(fill), 4)
+    for i in range(min(ENTRY_DAYS, len(cl))):
+        if l[i] <= hi and h[i] >= lo:
+            fill_i, out["fill"] = i, round(float(min(max(o[i], lo), hi)), 4)
             break
     if fill_i is None:
         out["status"] = "not_filled" if len(bars) >= ENTRY_DAYS else "pending"
         return out
-    risk = out["fill"] - stop
+    fill = out["fill"]
+    risk = fill - stop
     if risk <= 0:
         out["status"] = "not_filled"
         return out
-    held = bars.iloc[fill_i:fill_i + MAX_HOLD]
-    for j, b in enumerate(held.itertuples()):
-        first = j == 0
-        # Giriş günü: açılış bölgenin altındaysa stop kontrolü girişten sonra anlamlı; temkinli olarak yine kontrol et
-        if b.low <= stop:
-            px = b.open if (not first and b.open < stop) else stop
-            return {**out, "status": "stop", "days": j + 1, "r": round((px - out["fill"]) / risk, 2),
-                    "exit": round(float(px), 4), "exit_date": pd.Timestamp(b.date).date().isoformat()}
-        if b.high >= t1:
-            px = b.open if (not first and b.open > t1) else t1
-            return {**out, "status": "target", "days": j + 1, "r": round((px - out["fill"]) / risk, 2),
-                    "exit": round(float(px), 4), "exit_date": pd.Timestamp(b.date).date().isoformat()}
-    last = held.iloc[-1]
-    r = round((float(last["close"]) - out["fill"]) / risk, 2)
-    status = "timeout" if len(held) >= MAX_HOLD else "open"
-    return {**out, "status": status, "days": len(held), "r": r,
-            "exit": round(float(last["close"]), 4) if status == "timeout" else None,
-            "exit_date": pd.Timestamp(last["date"]).date().isoformat() if status == "timeout" else None,
-            "last": round(float(last["close"]), 4)}
+    target = c["target1"] if rule["target"] == "plan" else (fill + rule["target"] * risk if rule["target"] else None)
+    atr = float(c.get("atr") or 0) or risk / 1.5
+    r, days, px, how = run_exit(o, h, l, cl, fill_i, fill, stop, target, rule["hold"], atr,
+                                rule.get("trail"), rule.get("breakeven"), rule.get("partial"))
+    exit_date = pd.Timestamp(dates[fill_i + days - 1]).date().isoformat()
+    if how == "end":
+        status = "timeout" if days >= rule["hold"] else "open"
+    elif how == "target":
+        status = "target"
+    else:  # iz süren stop kârda tetiklenebilir
+        status = "trail" if r > 0 else "stop"
+    res = {**out, "status": status, "days": int(days), "r": round(float(r), 2),
+           "exit": round(float(px), 4) if status != "open" else None, "exit_date": exit_date if status != "open" else None}
+    if status == "open":
+        res["last"] = round(float(px), 4)
+    return res
 
 
 def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
@@ -110,7 +143,7 @@ def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
                 res = simulate(c, bars[bars["date"] > pd.Timestamp(h["date"])])
                 trades.append({"date": h["date"], "symbol": c["symbol"], "setup": c["setup"],
                                "regime": h.get("regime"), "planned_rr": c.get("rr"), **res})
-        closed = [t for t in trades if t["status"] in ("stop", "target", "timeout")]
+        closed = [t for t in trades if t["status"] in ("stop", "target", "timeout", "trail")]
         rs = np.array([t["r"] for t in closed], dtype=float)
         wins = sum(t["r"] > 0 for t in closed)
         out[market] = {
@@ -123,6 +156,7 @@ def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
             "closed": len(closed),
             "targets": sum(t["status"] == "target" for t in closed),
             "stops": sum(t["status"] == "stop" for t in closed),
+            "trails": sum(t["status"] == "trail" for t in closed),  # iz süren stopla kârla çıkış
             "timeouts": sum(t["status"] == "timeout" for t in closed),
             "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
             "avg_r": round(float(rs.mean()), 2) if len(rs) else None,

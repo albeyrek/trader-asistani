@@ -100,7 +100,9 @@ def assistant_today():
     side = _side_data()
     prices, scan = _load(PRICE_FILE), _load(SCAN_FILE)
     overview = market.overview(prices, scan, side.sectors if side else None)
-    return assistant.build(scan, prices, overview, side, pd.Timestamp(SCAN_FILE.stat().st_mtime, unit="s", tz="UTC"))
+    data = assistant.build(scan, prices, overview, side, pd.Timestamp(SCAN_FILE.stat().st_mtime, unit="s", tz="UTC"))
+    data.pop("agenda_snapshot", None)
+    return data
 
 
 @app.get("/api/assistant/score")
@@ -128,6 +130,17 @@ def time_machine(year: str):
     if year not in tm:
         raise HTTPException(404, "Bu yıl için veri yok")
     return tm[year]
+
+
+@app.get("/api/exits")
+def exit_rules():
+    """Çıkış kuralları karşılaştırması (bulutta exits.json)."""
+    from scanner import exits
+    if not exits.REPORT_JSON.exists():
+        raise HTTPException(404, "Çıkış kuralı raporu yok. 'python -m scanner.exits' çalıştırın.")
+    rep = json.loads(exits.REPORT_JSON.read_text(encoding="utf-8"))
+    return {"generated_at": rep["generated_at"], "selected": rep.get("selected", {}),
+            "policies": rep["policies"]["live"], "walk_forward": rep["walk_forward"]["live"]}
 
 
 @app.get("/api/agenda")

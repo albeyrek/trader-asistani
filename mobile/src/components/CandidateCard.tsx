@@ -101,9 +101,16 @@ export function CandidateCard({ c, quote, riskScale }: { c: Candidate; quote?: Q
       <View style={[styles.plan, { borderColor: t.border }]}>
         <PlanCell label="Giriş aralığı" value={`${f.price(c.entry_low)} – ${f.price(c.entry_high)}`} />
         <PlanCell label="Stop" value={f.price(c.stop)} sub={`risk %${f.num(c.risk_pct, 1)}`} color={t.down} />
-        <PlanCell label="Hedef 1 / 2" value={`${f.price(c.target1)} / ${f.price(c.target2)}`} sub={`ödül/risk ${f.num(c.rr, 1)}`} color={t.up} />
+        {c.exit_rule?.trail ? (
+          <PlanCell label="Çıkış" value="İz süren stop" sub={`${f.num(c.exit_rule.trail, 0)} ATR · ilk direnç ${f.price(c.target1)}`} color={t.up} />
+        ) : (
+          <PlanCell label="Hedef 1 / 2" value={`${f.price(c.target1)} / ${f.price(c.target2)}`} sub={`ödül/risk ${f.num(c.rr, 1)}`} color={t.up} />
+        )}
       </View>
-      {c.projected ? (
+      {c.exit_note ? (
+        <Text style={[styles.small, { color: t.muted, marginTop: 6 }]}>Çıkış kuralı: {c.exit_note}</Text>
+      ) : null}
+      {c.projected && !c.exit_rule?.trail ? (
         <Text style={[styles.small, { color: t.muted, marginTop: 6 }]}>
           Fiyat zirve bölgesinde, üstte direnç yok: hedefler stop mesafesinin katları olarak hesaplandı.
         </Text>

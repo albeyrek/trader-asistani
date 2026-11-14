@@ -5,6 +5,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 
 import { AgendaCard } from '@/components/AgendaCard';
 import { CandidateCard, rText, zoneStatus } from '@/components/CandidateCard';
+import { ExitsCard } from '@/components/ExitsCard';
 import { ModelCard } from '@/components/ModelCard';
 import { Card, Chip, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
@@ -13,7 +14,8 @@ import { usePortfolio } from '@/lib/portfolio';
 import { quoteKey, useQuotes } from '@/lib/quotes';
 import { regimeColors, useTheme } from '@/lib/theme';
 import type {
-  Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, Market, ModelMeta, StockSummary, TradeStatus,
+  Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, ExitsReport, Market, ModelMeta, StockSummary,
+  TradeStatus,
 } from '@/lib/types';
 
 /** "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop] */
@@ -28,6 +30,7 @@ export default function AssistantScreen() {
   const score = useApi<AssistantScore>('/api/assistant/score');
   const model = useApi<ModelMeta>('/api/model');
   const agenda = useApi<Agenda>('/api/agenda');
+  const exitsRep = useApi<ExitsReport>('/api/exits');
   const mk = data?.markets[market];
   const quotes = useQuotes(mk?.candidates ?? []);
 
@@ -69,6 +72,7 @@ export default function AssistantScreen() {
           <PortfolioCheck market={market} mk={mk} />
           <ScoreCard sc={score.data?.[market]} />
           <ModelCard meta={model.data} market={market} />
+          <ExitsCard rep={exitsRep.data} market={market} />
           <Text style={[styles.disclaimer, { color: t.muted }]}>
             {data.disclaimer}
             {data.ai_model ? ` Yorumlar yapay zekâ ile (${data.ai_model.split('/').pop()}) yazılır ve hata içerebilir; sayılar plandan gelir.` : ''}
@@ -192,6 +196,7 @@ function PortfolioCheck({ market, mk }: { market: Market; mk: AssistantMarket })
 
 const TRADE_TEXT: Record<TradeStatus, string> = {
   pending: 'bekliyor', not_filled: 'girilmedi', open: 'açık', target: 'hedef', stop: 'stop', timeout: 'süre doldu',
+  trail: 'iz süren stop (kâr)',
 };
 
 function ScoreCard({ sc }: { sc: AssistantScoreMarket | undefined }) {
@@ -210,7 +215,8 @@ function ScoreCard({ sc }: { sc: AssistantScoreMarket | undefined }) {
       ) : (
         <>
           <View style={styles.stats}>
-            <Stat label="Sonuçlanan" value={`${sc.closed}`} sub={`${sc.targets} hedef · ${sc.stops} stop`} />
+            <Stat label="Sonuçlanan" value={`${sc.closed}`}
+              sub={`${sc.targets + (sc.trails ?? 0)} kârla · ${sc.stops} stop`} />
             <Stat label="Kazanma oranı" value={sc.win_rate == null ? '—' : `%${f.num(sc.win_rate, 0)}`} />
             <Stat label="Ortalama" value={r(sc.avg_r)} color={sc.avg_r == null ? t.muted : sc.avg_r >= 0 ? t.up : t.down} />
             <Stat label="Toplam" value={r(sc.total_r)} color={sc.total_r == null ? t.muted : sc.total_r >= 0 ? t.up : t.down} />

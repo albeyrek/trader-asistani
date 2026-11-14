@@ -50,6 +50,10 @@ jobs:
       - name: Ogrenme
         run: python -m scanner.learn
 
+      # Çıkış kurallarını 10 yılda karşılaştır; asistan seçilen kuralı kullanır
+      - name: Cikis kurallari
+        run: python -m scanner.exits
+
       - name: Disa aktarma
         run: python -m scanner.export --out ../site
 

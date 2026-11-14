@@ -47,6 +47,7 @@ export async function cloudGet<T>(path: string, signal?: AbortSignal): Promise<T
   if (url.pathname === '/api/scorecard') return get<T>('scorecard.json', signal);
   if (url.pathname === '/api/assistant/score') return get<T>('assistant_score.json', signal);
   if (url.pathname === '/api/model') return get<T>('model.json', signal);
+  if (url.pathname === '/api/exits') return get<T>('exits.json', signal);
   if (url.pathname === '/api/agenda') {
     const res = await fetch(`${WORKER_URL}/api/agenda`, { signal });
     if (!res.ok) throw new Error(`Gündem alınamadı (HTTP ${res.status})`);

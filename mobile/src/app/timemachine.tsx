@@ -12,6 +12,7 @@ import type { Market, ModelMeta, TmPick, TmWeek, TmYear, TradeStatus, YearRow } 
 const SETUP_TEXT = { breakout: 'Kırılım', pullback: 'Geri çekilme', trend: 'Trend devamı' } as const;
 const STATUS_TEXT: Record<TradeStatus, string> = {
   target: 'Hedefe ulaştı', stop: 'Stop oldu', timeout: '20 günde sonuçlanmadı', open: 'Açık', not_filled: 'Girilmedi',
+  trail: 'İz süren stopla kâr',
   pending: 'Bekliyor',
 };
 
