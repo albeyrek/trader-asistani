@@ -292,11 +292,83 @@ export function cleanAnswer(raw: string): string {
   return raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim().slice(0, 3000);
 }
 
+// ------------------------------------------------------------------ rakam doğrulama
+// Yapay zekânın cevabındaki her sayı, ona verilen bağlamda (ve kullanıcının sorularında) aranır. Bulunamayan sayı
+// "doğrulanamadı" olarak işaretlenir: uydurma ya da yapay zekânın kendi hesabı olabilir.
+
+export interface NumberToken { raw: string; values: number[]; tol: number; small: boolean }
+
+const SCALE: Record<string, number> = { bin: 1e3, milyon: 1e6, milyar: 1e9, trilyon: 1e12 };
+// Endeks ve kod adlarındaki sayılar rakam değildir (BIST 100, S&P 500, XU100, A1CAP)
+const NAME_NUMBERS = /\b(?:bist|xu|xbank|s&p|nasdaq|dow|russell|msci)\s?-?\d+|[a-zçğıöşü]\d+[a-z0-9]*/giu;
+const DATES = /\b(\d{4})-(\d{2})-(\d{2})\b|\b(\d{1,2})[./](\d{1,2})[./](\d{4})\b/g;
+const NUMBER = /(%\s*)?[-+−]?(\d{1,3}(?:[.,]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)(\s*%)?(\s*(?:bin(?![a-zçğıöşü])|milyon|milyar|trilyon))?/giu;
+
+/** "1.234,56" / "1,234.56" / "12,5" / "%3" / "1,2 milyar" -> olası değerler (biçim belirsizse ikisi de) ve yuvarlama payı. */
+export function parseNumbers(text: string): NumberToken[] {
+  const out: NumberToken[] = [];
+  const cleaned = text.replace(NAME_NUMBERS, ' ').replace(DATES, (_, y, m, d, d2, m2, y2) =>
+    y ? ` ${y} ${m} ${d} ` : ` ${y2} ${m2} ${d2} `)
+    .replace(/\b\d{1,2}:\d{2}\b/g, ' ') // saatler
+    .replace(/^\s*\d+[.)]\s/gm, ' '); // madde numaraları
+  for (const m of cleaned.matchAll(NUMBER)) {
+    const body = m[2];
+    const pct = !!(m[1] || m[3]);
+    const scale = m[4] ? SCALE[m[4].trim().toLocaleLowerCase('tr')] ?? 1 : 1;
+    const dot = body.lastIndexOf('.');
+    const comma = body.lastIndexOf(',');
+    const cands: [number, number][] = []; // [değer, ondalık hane]
+    const decimalAt = (sep: number) => [Number(body.slice(0, sep).replace(/[.,]/g, '') + '.' + body.slice(sep + 1)), body.length - sep - 1] as [number, number];
+    const thousands = () => [Number(body.replace(/[.,]/g, '')), 0] as [number, number];
+    if (dot >= 0 && comma >= 0) cands.push(decimalAt(Math.max(dot, comma)));
+    else if (dot >= 0 || comma >= 0) {
+      const sep = Math.max(dot, comma);
+      if (/^\d{1,3}([.,]\d{3})+$/.test(body)) cands.push(thousands(), decimalAt(sep)); // 1.234: bin ya da 1,234
+      else cands.push(decimalAt(sep));
+    } else cands.push([Number(body), 0]);
+    const tol = Math.max(...cands.map(([, d]) => 0.5 * 10 ** -d)) * scale + 1e-9;
+    const v0 = cands[0][0];
+    out.push({
+      raw: m[0].trim(), values: cands.map(([v]) => v * scale), tol,
+      // küçük tam sayılar (adet, R katı) ve yıllar her cevapta doğal: kontrol edilmez
+      small: !pct && scale === 1 && cands.length === 1 && cands[0][1] === 0 && (v0 <= 10 || (v0 >= 1990 && v0 <= 2100)),
+    });
+  }
+  return out;
+}
+
+/** Bağlamdaki tüm sayılar (yüzde/oran dönüşümü dahil). */
+export function referenceNumbers(...texts: string[]): number[] {
+  const ref: number[] = [];
+  for (const t of texts) for (const n of parseNumbers(t)) for (const v of n.values) ref.push(Math.abs(v), Math.abs(v) * 100);
+  return ref;
+}
+
+/** Cevaptaki bağlamda bulunmayan sayılar (ham yazımlarıyla). */
+export function verifyNumbers(answerText: string, ref: number[]): { checked: number; unverified: string[] } {
+  const unverified: string[] = [];
+  let checked = 0;
+  for (const n of parseNumbers(answerText)) {
+    if (n.small) continue;
+    checked++;
+    const ok = n.values.some((v) => ref.some((r) => Math.abs(Math.abs(v) - r) <= n.tol));
+    if (!ok && !unverified.includes(n.raw)) unverified.push(n.raw);
+  }
+  return { checked, unverified };
+}
+
 type AiResult = { response?: unknown; choices?: { message?: { content?: unknown } }[] };
 
-export async function answer(ai: Ai, req: ChatRequest, context: string): Promise<string | null> {
+/** strict: önceki denemede bağlamda bulunmayan sayılar (ikinci denemede yapay zekâya hatırlatılır). */
+export async function answer(ai: Ai, req: ChatRequest, context: string, strict?: string[]): Promise<string | null> {
+  const messages = chatPrompt(req, context);
+  if (strict?.length) {
+    messages[0] = { role: 'system', content: `${messages[0].content}\n\nUYARI: Önceki cevabında bağlamda olmayan şu sayılar vardı: `
+      + `${strict.slice(0, 8).join(', ')}. Bu kez YALNIZCA bağlamda yazan rakamları aynen kullan; kendin hesaplama, `
+      + 'tahmin ya da yuvarlama yapma. Gerekli rakam bağlamda yoksa rakamsız anlat.' };
+  }
   const res = (await ai.run(AI_MODEL as Parameters<Ai['run']>[0], {
-    messages: chatPrompt(req, context), max_tokens: 700, temperature: 0.3, ...MODEL_OPTIONS[AI_MODEL],
+    messages, max_tokens: 700, temperature: strict?.length ? 0.1 : 0.3, ...MODEL_OPTIONS[AI_MODEL],
   } as never)) as AiResult;
   const raw = typeof res.response === 'string' ? res.response : res.choices?.[0]?.message?.content;
   return typeof raw === 'string' && raw.trim() ? cleanAnswer(raw) : null;

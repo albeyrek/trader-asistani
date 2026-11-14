@@ -1,3 +1,5 @@
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
@@ -6,7 +8,7 @@ import { fetchJson, useApi } from '@/lib/api';
 import * as f from '@/lib/format';
 import { useSettings } from '@/lib/settings';
 import { useTheme } from '@/lib/theme';
-import type { Market, Meta } from '@/lib/types';
+import type { Health, Market, Meta } from '@/lib/types';
 
 type Status = { ok: boolean; text: string };
 
@@ -62,6 +64,8 @@ export default function SettingsScreen() {
         ) : null}
         {status ? <Text style={[styles.text, { color: status.ok ? t.up : t.down, marginTop: 8 }]}>{status.text}</Text> : null}
       </Card>
+
+      <SystemCard />
 
       {mode === 'local' ? (
       <Card title="Yerel sunucu adresi">
@@ -181,7 +185,37 @@ function NotificationsCard() {
   );
 }
 
+/** Sistem durumu (her taramada yapılan kontroller) ve değişiklik günlüğü bağlantıları. */
+function SystemCard() {
+  const t = useTheme();
+  const { data } = useApi<Health>('/api/health');
+  const label = !data ? 'Kontroller yükleniyor' : data.overall === 'ok' ? 'Her şey yolunda'
+    : data.overall === 'warn' ? `${data.checks.filter((c) => c.status !== 'ok').length} uyarı` : 'Sorun var';
+  const color = !data ? t.muted : data.overall === 'ok' ? t.up : data.overall === 'warn' ? t.warn : t.down;
+  const rows = [
+    { key: 'health', icon: 'pulse-outline' as const, title: 'Sistem durumu', sub: label, color, go: () => router.push('/health') },
+    { key: 'changelog', icon: 'git-commit-outline' as const, title: 'Değişiklik günlüğü',
+      sub: 'Kurallar ve model ne zaman, neden değişti', color: t.muted, go: () => router.push('/changelog') },
+  ];
+  return (
+    <Card title="Sistem">
+      {rows.map((r, i) => (
+        <Pressable key={r.key} onPress={r.go} accessibilityRole="button"
+          style={[styles.linkRow, i ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.border } : null]}>
+          <Ionicons name={r.icon} size={20} color={t.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: t.text, fontSize: 14, fontWeight: '600' }}>{r.title}</Text>
+            <Text style={[styles.text, { color: r.color }]}>{r.sub}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={t.muted} />
+        </Pressable>
+      ))}
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
+  linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   switchRow: {
     flexDirection: 'row',
     alignItems: 'center',

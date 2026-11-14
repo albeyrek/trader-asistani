@@ -9,6 +9,7 @@ from .config import CHUNK_PAUSE_SEC, CHUNK_SIZE, DATA_DIR, HISTORY_PERIOD, UPDAT
 PRICE_FILE = DATA_DIR / "prices_daily.parquet"
 COLUMNS = ["Open", "High", "Low", "Close", "Volume"]
 BIST_SPLIT_GAP = -0.25
+BIST_REVERSE_GAP = 0.35
 # Yahoo toplu indirmede bazen bazı hisselerin son gününü göndermiyor (ör. 13 Kasım 2026'da ABD hisselerinin ~%37'si).
 # Son bir haftada işlem görmüş ama son işlem günü eksik hisseler kısa bir beklemeden sonra yeniden istenir.
 RETRY_PERIOD = "5d"
@@ -54,13 +55,14 @@ def download_prices(yf_symbols: list[str], period: str) -> pd.DataFrame:
 
 
 def fix_bist_splits(df: pd.DataFrame) -> pd.DataFrame:
-    """yfinance BIST'teki bedelsiz sermaye artırımlarını her zaman düzeltmiyor.
-    BIST'te günlük fiyat limiti ±%10 olduğu için açılışta %25'ten büyük bir aşağı boşluk
-    bölünme kabul edilir ve önceki tüm fiyatlar aynı oranda geriye dönük düzeltilir."""
+    """yfinance BIST'teki bedelsiz sermaye artırımlarını ve ters bölünmeleri (pay birleştirme) her zaman düzeltmiyor.
+    BIST'te günlük fiyat limiti ±%10 olduğu için açılışta %25'ten büyük bir aşağı boşluk bölünme, %35'ten büyük bir
+    yukarı boşluk ters bölünme kabul edilir ve önceki tüm fiyatlar aynı oranda geriye dönük düzeltilir."""
     bist = df["yf_symbol"].str.endswith(".IS")
     g = df[bist].sort_values(["yf_symbol", "date"]).copy()
     prev_close = g.groupby("yf_symbol")["close"].shift()
-    ratio = (g["open"] / prev_close).where(g["open"] / prev_close - 1 < BIST_SPLIT_GAP, 1.0).fillna(1.0)
+    gap = g["open"] / prev_close - 1
+    ratio = (g["open"] / prev_close).where((gap < BIST_SPLIT_GAP) | (gap > BIST_REVERSE_GAP), 1.0).fillna(1.0)
     # Her satırın faktörü = kendisinden SONRAKİ tüm bölünme oranlarının çarpımı
     rev_cum = ratio.iloc[::-1].groupby(g["yf_symbol"].iloc[::-1]).cumprod().iloc[::-1]
     factor = rev_cum / ratio

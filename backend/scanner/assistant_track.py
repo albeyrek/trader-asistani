@@ -161,6 +161,7 @@ def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
             "win_rate": round(wins / len(closed) * 100, 1) if closed else None,
             "avg_r": round(float(rs.mean()), 2) if len(rs) else None,
             "total_r": round(float(rs.sum()), 2) if len(rs) else None,
+            "closed_rs": [round(float(x), 3) for x in rs],  # sapma alarmı için (health.drift)
             "trades": list(reversed(trades))[:RECENT_TRADES],
         }
     return out

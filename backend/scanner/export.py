@@ -12,6 +12,8 @@ site/data/
                                 sınıflandırma kuralları ve eşikler (tek kaynak: Python kodu)
   levels.json                   gün içi alarmlar için son kapanış, destek, direnç, stop seviyeleri
   market.json                   piyasa rejimi: endeksler, genişlik ve geçmişi, rejim etiketi, sektörler
+  health.json                   sistem sağlığı: veri tazeliği, kaynaklar, öğrenme yaşı, canlı sonuç sapması
+  changelog.json                değişiklik günlüğü: asistanın davranışını etkileyen değişiklikler (el ile + otomatik)
   assistant.json                asistan: günün alım adayları, işlem planları, kural tabanlı yorumlar
   assistant_score.json          asistan karnesi: geçmiş adaylar plana uyulsaydı sonuç (R)
   assistant_history.json        karnenin ham geçmişi
@@ -29,7 +31,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
-from . import assistant, assistant_track, exits, learn, paper, scorecard, us_strategy, views
+from . import assistant, assistant_track, changelog, exits, health, learn, paper, scorecard, us_strategy, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -122,8 +124,18 @@ def export(out: Path) -> None:
     # Piyasa rejimi: endeksler, genişlik, rejim etiketi (tüm fiyatlar gerekir: endeksler taranan hisselerde değil)
     overview = market_view.overview(all_prices, scan, side.sectors)
     _write(data / "market.json", overview)
+    # Sistem sağlığı: veri sorunu olan piyasada asistan aday vermez; canlı sonuçlar testten belirgin kötüyse temkinli
+    # (sapma için dünkü karne kullanılır: bugünün adayları henüz sonuçlanmadı)
+    model_meta = json.loads(learn.META_FILE.read_text(encoding="utf-8")) if learn.META_FILE.exists() else None
+    exits_rep = json.loads(exits.REPORT_JSON.read_text(encoding="utf-8")) if exits.REPORT_JSON.exists() else None
+    prev_score = assistant_track.evaluate(assistant_track.load_history(), all_prices)
+    hl = health.safe_build(scan, all_prices, news, prev_score, model_meta, exits_rep, health.kap_archive_days())
+    _write(data / "health.json", hl)
+    health.archive_universe(raw_scan, str(scan["date"].max()))
+    print(f"  sağlık: {hl['overall']} ({sum(c['status'] != 'ok' for c in hl['checks'])} uyarı/hata)")
+    _write(data / "changelog.json", changelog.update(model_meta, exits_rep, str(scan["date"].max())))
     # Asistan: günün alım adayları ve işlem planları; geçmiş adayların sonucu (asistan karnesi)
-    asst = assistant.build(scan, all_prices, overview, side, updated)
+    asst = assistant.build(scan, all_prices, overview, side, updated, hl)
     archive_agenda(asst.get("agenda_snapshot"), str(scan["date"].max()))
     asst.pop("agenda_snapshot", None)
     _write(data / "assistant.json", asst)
@@ -139,8 +151,8 @@ def export(out: Path) -> None:
                                               "risk_pct": paper.RISK_PCT * 100, "max_positions": paper.MAX_POSITIONS,
                                               "participation_pct": paper.PARTICIPATION * 100}})
     # Öğrenen model: nasıl öğrendiği, test sonuçları, neye baktığı (haftalık eğitim: scanner/learn.py)
-    if learn.META_FILE.exists():
-        _write(data / "model.json", json.loads(learn.META_FILE.read_text(encoding="utf-8")))
+    if model_meta:
+        _write(data / "model.json", model_meta)
     # ABD strateji araştırması: karşılaştırma (haftalık öğrenmede), deneysel momentum portföyünün bugünkü hisseleri ve
     # canlı testi (her gün)
     try:
@@ -162,8 +174,8 @@ def export(out: Path) -> None:
     except Exception as exc:  # araştırma çıktısı ana dışa aktarmayı durdurmasın
         print(f"  ! ABD strateji çıktısı: {exc!r}")
     # Çıkış kuralları karşılaştırması (haftalık öğrenmede güncellenir: scanner/exits.py)
-    if exits.REPORT_JSON.exists():
-        rep = json.loads(exits.REPORT_JSON.read_text(encoding="utf-8"))
+    if exits_rep:
+        rep = exits_rep
         _write(data / "exits.json", {"generated_at": rep["generated_at"], "selected": rep.get("selected", {}),
                                      "policies": rep["policies"]["live"], "walk_forward": rep["walk_forward"]["live"]})
     # Zaman makinesi: geçmiş haftalarda asistanın seçimleri ve sonuçları (yıl başına bir dosya)

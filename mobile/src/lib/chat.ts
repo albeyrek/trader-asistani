@@ -23,6 +23,21 @@ export interface ChatMessage {
   at: string;
   sources?: ChatSource[];
   error?: boolean;
+  /** Rakam doğrulama: cevaptaki sayılar uygulamanın verisinde bulundu mu (checked: kontrol edilen sayı adedi) */
+  verified?: boolean;
+  checked?: number;
+  unverified?: string[];
+  /** Cevabın sorusu (geri bildirimde gönderilir) ve kullanıcının değerlendirmesi */
+  question?: string;
+  rating?: 1 | -1;
+}
+
+export interface ChatAnswer {
+  answer: string;
+  sources: ChatSource[];
+  verified?: boolean;
+  checked?: number;
+  unverified?: string[];
 }
 
 export async function loadHistory(): Promise<ChatMessage[]> {
@@ -46,7 +61,7 @@ export async function ask(
     market?: Market;
     portfolio: { symbol: string; market: Market; qty: number; cost: number }[];
   },
-): Promise<{ answer: string; sources: ChatSource[] }> {
+): Promise<ChatAnswer> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -59,9 +74,10 @@ export async function ask(
         token: ctx.token ?? undefined, symbol: ctx.symbol, market: ctx.market, portfolio: ctx.portfolio,
       }),
     });
-    const body = (await res.json().catch(() => ({}))) as { answer?: string; sources?: ChatSource[]; detail?: string };
+    const body = (await res.json().catch(() => ({}))) as Partial<ChatAnswer> & { detail?: string };
     if (!res.ok || !body.answer) throw new Error(body.detail ?? `Cevap alınamadı (HTTP ${res.status})`);
-    return { answer: body.answer, sources: body.sources ?? [] };
+    return { answer: body.answer, sources: body.sources ?? [], verified: body.verified, checked: body.checked,
+      unverified: body.unverified ?? [] };
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') throw new Error('Asistan zamanında cevap veremedi; tekrar deneyin.');
     if (e instanceof TypeError) throw new Error('Asistana ulaşılamadı. İnternet bağlantını kontrol et.');
@@ -69,4 +85,14 @@ export async function ask(
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Cevaba 👍/👎 (bulutta son 200 değerlendirme tutulur; asistanın zayıf olduğu soru türlerini görmek için). */
+export async function sendFeedback(m: ChatMessage, rating: 1 | -1, token: string | null): Promise<void> {
+  const res = await fetch(`${WORKER_URL}/api/chat/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating, question: m.question ?? '', answer: m.content, unverified: m.unverified ?? [], token: token ?? undefined }),
+  });
+  if (!res.ok) throw new Error(`Değerlendirme gönderilemedi (HTTP ${res.status})`);
 }

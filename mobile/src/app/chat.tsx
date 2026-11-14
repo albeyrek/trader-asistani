@@ -6,7 +6,7 @@ import {
   type ScrollViewInstance,
 } from 'react-native';
 
-import { ask, loadHistory, saveHistory, type ChatMessage, type ChatSource } from '@/lib/chat';
+import { ask, loadHistory, saveHistory, sendFeedback, type ChatMessage, type ChatSource } from '@/lib/chat';
 import { usePortfolio } from '@/lib/portfolio';
 import { useSettings } from '@/lib/settings';
 import { useTheme, type Theme } from '@/lib/theme';
@@ -53,7 +53,10 @@ export default function ChatScreen() {
         token: push?.state === 'ok' ? push.token : null, symbol, market,
         portfolio: positions.map((p) => ({ symbol: p.symbol, market: p.market, qty: p.qty, cost: p.cost })),
       });
-      const done = [...next, { role: 'assistant' as const, content: res.answer, at: new Date().toISOString(), sources: res.sources }];
+      const done: ChatMessage[] = [...next, {
+        role: 'assistant', content: res.answer, at: new Date().toISOString(), sources: res.sources, question,
+        verified: res.verified, checked: res.checked, unverified: res.unverified,
+      }];
       setMsgs(done);
       saveHistory(done);
     } catch (e) {
@@ -61,6 +64,19 @@ export default function ChatScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const token = push?.state === 'ok' ? push.token : null;
+  const rate = (i: number, rating: 1 | -1) => {
+    const m = msgs[i];
+    if (!m || m.rating) return;
+    const updated = msgs.map((x, j) => (j === i ? { ...x, rating } : x));
+    setMsgs(updated);
+    saveHistory(updated);
+    sendFeedback(m, rating, token).catch(() => {
+      // gönderilemezse işaret geri alınır (kullanıcı yeniden deneyebilir)
+      setMsgs((cur) => cur.map((x) => (x.at === m.at ? { ...x, rating: undefined } : x)));
+    });
   };
 
   const clear = () => {
@@ -89,7 +105,7 @@ export default function ChatScreen() {
             </Text>
           </View>
         ) : null}
-        {msgs.map((m, i) => <Bubble key={`${m.at}-${i}`} m={m} t={t} />)}
+        {msgs.map((m, i) => <Bubble key={`${m.at}-${i}`} m={m} t={t} onRate={(r) => rate(i, r)} />)}
         {busy ? (
           <View style={[styles.bubble, styles.left, { backgroundColor: t.card, borderColor: t.border, flexDirection: 'row', gap: 8 }]}>
             <ActivityIndicator size="small" color={t.accent} />
@@ -126,8 +142,9 @@ export default function ChatScreen() {
   );
 }
 
-function Bubble({ m, t }: { m: ChatMessage; t: Theme }) {
+function Bubble({ m, t, onRate }: { m: ChatMessage; t: Theme; onRate: (r: 1 | -1) => void }) {
   const mine = m.role === 'user';
+  const showCheck = !mine && !m.error && m.verified !== undefined && (m.checked ?? 0) > 0;
   return (
     <View style={[styles.bubble, mine ? styles.right : styles.left,
       mine ? { backgroundColor: t.accent } : { backgroundColor: t.card, borderColor: m.error ? t.down : t.border }]}>
@@ -141,6 +158,28 @@ function Bubble({ m, t }: { m: ChatMessage; t: Theme }) {
               <Text style={{ color: t.accent, fontSize: 11, fontWeight: '600' }}>{s.label}</Text>
             </Pressable>
           ))}
+        </View>
+      ) : null}
+      {showCheck ? (
+        <View style={styles.check}>
+          <Ionicons name={m.verified ? 'checkmark-circle' : 'alert-circle'} size={14} color={m.verified ? t.up : t.warn} />
+          <Text style={[styles.tiny, { color: m.verified ? t.muted : t.warn, flex: 1 }]}>
+            {m.verified
+              ? `Cevaptaki ${m.checked} rakam uygulamanın verisiyle doğrulandı`
+              : `Doğrulanamayan rakam: ${m.unverified?.join(', ')} — uygulamanın verisinde yok (yapay zekânın hesabı ya da hatası olabilir)`}
+          </Text>
+        </View>
+      ) : null}
+      {!mine && !m.error ? (
+        <View style={styles.rateRow}>
+          {([1, -1] as const).map((r) => (
+            <Pressable key={r} onPress={() => onRate(r)} disabled={!!m.rating} hitSlop={8} accessibilityRole="button"
+              accessibilityLabel={r === 1 ? 'Faydalı cevap' : 'Kötü cevap'}>
+              <Ionicons name={r === 1 ? (m.rating === 1 ? 'thumbs-up' : 'thumbs-up-outline') : (m.rating === -1 ? 'thumbs-down' : 'thumbs-down-outline')}
+                size={16} color={m.rating === r ? t.accent : t.muted} />
+            </Pressable>
+          ))}
+          {m.rating ? <Text style={[styles.tiny, { color: t.muted }]}>Teşekkürler</Text> : null}
         </View>
       ) : null}
     </View>
@@ -189,6 +228,8 @@ const styles = StyleSheet.create({
   sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' },
   source: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
   tiny: { fontSize: 11 },
+  check: { flexDirection: 'row', gap: 6, alignItems: 'flex-start', marginTop: 8 },
+  rateRow: { flexDirection: 'row', gap: 14, alignItems: 'center', marginTop: 8 },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
   suggestion: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth },

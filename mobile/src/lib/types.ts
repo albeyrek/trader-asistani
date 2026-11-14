@@ -315,6 +315,45 @@ export interface AssistantMarket {
   /** Strateji formu: asistanın planları son 8 haftada (geçmiş veride) ne kazandırdı; negatifse temkin modu */
   form?: { recent_r: number; recent_n: number; recent_win: number | null; long_r: number; long_n: number;
     effective?: boolean } | null;
+  /** Veri sorunu (ör. hisselerin çoğunda son günün fiyatı yok): o gün aday verilmez */
+  data_issue?: string | null;
+  /** Canlı sonuçların 10 yıllık testin beklentisine göre durumu; "alarm"da liste kısalır, pozisyon yarıya iner */
+  drift?: DriftInfo | null;
+}
+
+export interface DriftInfo {
+  status: 'ok' | 'watch' | 'alarm' | 'insufficient';
+  n: number;
+  expected: number | null;
+  live: number | null;
+  z?: number;
+  text: string;
+}
+
+export interface HealthCheck {
+  id: string;
+  name: string;
+  status: 'ok' | 'warn' | 'error';
+  detail: string;
+  market: Market | null;
+}
+
+/** Sistem sağlığı (her taramada): veri tazeliği, kaynaklar, öğrenme yaşı, canlı sonuç sapması */
+export interface Health {
+  generated_at: string;
+  overall: 'ok' | 'warn' | 'error';
+  checks: HealthCheck[];
+  drift: Partial<Record<Market, DriftInfo>>;
+  blocked_markets: Market[];
+}
+
+export interface ChangelogEntry {
+  date: string;
+  kind: 'feature' | 'rule' | 'model' | 'data';
+  kind_name: string;
+  title: string;
+  detail: string;
+  auto: boolean;
 }
 
 export interface AssistantData {

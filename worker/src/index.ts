@@ -7,7 +7,8 @@
 //  - GET  /api/assistant : günün alım adayları + yapay zekâ yorumları
 //  - 10 dakikada bir (ayrı cron): yeni aday listesi için Workers AI yorumu, ardından liste bildirimi
 //  - GET  /api/agenda    : gündem (temalar, sektör etkisi, politik risk, yapay zekâ özeti, takvim)
-//  - POST /api/chat      : sohbet asistanı (soruyu uygulamanın verisiyle cevaplar; günlük sınır)
+//  - POST /api/chat      : sohbet asistanı (soruyu uygulamanın verisiyle cevaplar, rakamları doğrular; günlük sınır)
+//  - POST /api/chat/feedback : sohbet cevabına 👍/👎 (son 200 değerlendirme KV'de)
 //  - 15 dakikada bir (ayrı cron): gündem başlıkları, politik risk; risk yükselince bildirim
 // Haber mantığı backend/scanner/watch.py ile aynıdır; kurallar ve eşikler GitHub Pages'teki watch_meta.json'dan gelir.
 
@@ -24,7 +25,8 @@ import {
   aiSummary, calendar, fetchTopic, politicalRisk, riskMessage, summarize, TOPICS,
   type AgendaItem, type AiTheme, type PoliticalRisk,
 } from './agenda';
-import { answer, buildContext, type ChatRequest } from './chat';
+import { answer, buildContext, referenceNumbers, verifyNumbers, type ChatRequest } from './chat';
+import { healthAlert, trDay, type Health } from './health';
 import { fetchQuote, yahooSymbol, type Market, type Quote } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
 
@@ -440,7 +442,7 @@ interface AgendaState {
   risk?: PoliticalRisk & { at: string };
   riskNotifiedAt?: string;
   ai?: { at: string; n: number; themes: AiTheme[] };
-  last?: { at: string; fetched: number; fresh: number; failed: number; sent: number; error?: string };
+  last?: { at: string; fetched: number; fresh: number; failed: number; sent: number; error?: string; fail_reason?: string };
 }
 
 const EMPTY_AGENDA: AgendaState = { items: [], political: {}, cursor: 0 };
@@ -467,6 +469,7 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
   let fetched = 0;
   let fresh = 0;
   let failed = 0;
+  let failReason: string | undefined;
   for (const topic of group) {
     try {
       const items = await fetchTopic(topic);
@@ -478,8 +481,9 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
         fresh++;
         if (it.themes.some((t) => t.theme === 'gerilim')) st.political[it.id] = Date.parse(it.published ?? at) || now;
       }
-    } catch {
+    } catch (e) {
       failed++;
+      failReason ??= String(e).slice(0, 120);
     }
   }
   st.items = st.items.filter((it) => now - Date.parse(it.published ?? it.seen) <= AGENDA_KEEP_MS);
@@ -527,7 +531,7 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
     }
   }
 
-  const last = { at, fetched, fresh, failed, sent };
+  const last = { at, fetched, fresh, failed, sent, ...(failReason ? { fail_reason: failReason } : {}) };
   st.last = last;
   await env.KV.put('agenda', JSON.stringify(st));
   return last;
@@ -560,13 +564,13 @@ const CHAT_MAX_CHARS = 2000;
 
 /** Günlük sayaç Cloudflare önbelleğinde tutulur (KV'nin günlük 1000 yazma sınırı harcanmasın). Kesin değil ama
  *  ücretsiz yapay zekâ kotasını kötüye kullanıma karşı korumaya yeter. */
-async function chatQuota(client: string): Promise<boolean> {
+async function chatQuota(client: string, kind = 'chat', limit = CHAT_DAILY_LIMIT): Promise<boolean> {
   const day = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
-  const key = new Request(`https://quota.local/chat/${day}/${encodeURIComponent(client)}`);
+  const key = new Request(`https://quota.local/${kind}/${day}/${encodeURIComponent(client)}`);
   const cache = caches.default;
   const hit = await cache.match(key);
   const used = hit ? Number(await hit.text()) || 0 : 0;
-  if (used >= CHAT_DAILY_LIMIT) return false;
+  if (used >= limit) return false;
   await cache.put(key, new Response(String(used + 1), { headers: { 'Cache-Control': 'max-age=90000' } }));
   return true;
 }
@@ -606,7 +610,62 @@ async function chatEndpoint(req: Request, env: Env): Promise<Response> {
     return json({ detail: `Yapay zekâ şu an cevap veremedi (${String(e).slice(0, 80)}). Biraz sonra tekrar deneyin.` }, 503);
   }
   if (!text) return json({ detail: 'Yapay zekâ boş cevap döndü; soruyu farklı sormayı deneyin.' }, 503);
-  return json({ answer: text, sources, model: AI_MODEL });
+  // Rakam doğrulama: cevaptaki sayılar bağlamda ya da kullanıcının sorularında yoksa bir kez daha, daha sıkı
+  // talimatla sorulur; daha az doğrulanamayan sayı içeren cevap kullanılır.
+  const ref = referenceNumbers(context, ...clean.filter((m) => m.role === 'user').map((m) => m.content));
+  let check = verifyNumbers(text, ref);
+  let retried = false;
+  if (check.unverified.length) {
+    retried = true;
+    const second = await answer(env.AI, request, context, check.unverified).catch(() => null);
+    const c2 = second ? verifyNumbers(second, ref) : null;
+    if (second && c2 && c2.unverified.length < check.unverified.length) {
+      text = second;
+      check = c2;
+    }
+  }
+  return json({
+    answer: text, sources, model: AI_MODEL,
+    verified: check.unverified.length === 0, checked: check.checked, unverified: check.unverified, retried,
+  });
+}
+
+interface ChatFeedback {
+  at: string;
+  rating: 1 | -1;
+  question: string;
+  answer: string;
+  unverified: string[];
+  note?: string;
+}
+const FEEDBACK_KEEP = 200;
+const FEEDBACK_DAILY_LIMIT = 30;
+
+/** 👍/👎: son FEEDBACK_KEEP değerlendirme KV'de tutulur (hangi tür sorularda asistanın zayıf olduğunu görmek için). */
+async function chatFeedback(req: Request, env: Env): Promise<Response> {
+  let body: Partial<ChatFeedback> & { token?: string };
+  try {
+    body = (await req.json()) as typeof body;
+  } catch {
+    return json({ detail: 'Geçersiz JSON' }, 400);
+  }
+  if (body.rating !== 1 && body.rating !== -1) return json({ detail: 'Değerlendirme 1 ya da -1 olmalı' }, 422);
+  if (typeof body.answer !== 'string' || !body.answer.trim()) return json({ detail: 'Cevap bulunamadı' }, 422);
+  const token = typeof body.token === 'string' && TOKEN_RE.test(body.token) ? body.token : null;
+  if (!(await chatQuota(token ?? req.headers.get('CF-Connecting-IP') ?? 'bilinmiyor', 'feedback', FEEDBACK_DAILY_LIMIT))) {
+    return json({ detail: 'Günlük değerlendirme sınırına ulaşıldı' }, 429);
+  }
+  const entry: ChatFeedback = {
+    at: new Date().toISOString(), rating: body.rating,
+    question: typeof body.question === 'string' ? body.question.slice(0, 500) : '',
+    answer: body.answer.slice(0, 1500),
+    unverified: Array.isArray(body.unverified) ? body.unverified.filter((x) => typeof x === 'string').slice(0, 10).map((x) => x.slice(0, 20)) : [],
+    ...(typeof body.note === 'string' && body.note.trim() ? { note: body.note.slice(0, 300) } : {}),
+  };
+  const list = (await env.KV.get<ChatFeedback[]>('chat_feedback', 'json')) ?? [];
+  list.push(entry);
+  await env.KV.put('chat_feedback', JSON.stringify(list.slice(-FEEDBACK_KEEP)));
+  return json({ ok: true });
 }
 
 // ------------------------------------------------------------------ asistan
@@ -677,6 +736,23 @@ async function runAssistant(env: Env): Promise<AiState['last']> {
   return last;
 }
 
+/** Sistem sağlığı "hata" ya da günlük tarama günlerdir çalışmadıysa günde bir bildirim (bkz. health.ts). */
+async function runHealthAlert(env: Env): Promise<void> {
+  if (quietHours()) return;
+  const r = await fetch(`${env.DATA_URL}/health.json`, { cf: { cacheTtl: 300 } });
+  if (!r.ok) return;
+  const msg = healthAlert((await r.json()) as Health);
+  if (!msg) return;
+  const day = trDay();
+  if ((await env.KV.get('health_alert')) === day) return;
+  const devices = Object.entries(await listDevices(env)).filter(([, d]) => d.notify_assistant !== false);
+  const messages: PushMessage[] = devices.map(([token]) => ({
+    to: token, title: msg.title, body: msg.body, data: { screen: 'health' }, sound: 'default', channelId: 'default',
+  }));
+  if (messages.length) await send(messages, env);
+  await env.KV.put('health_alert', day);
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
@@ -696,6 +772,7 @@ export default {
       });
     }
     if (url.pathname === '/api/chat' && req.method === 'POST') return chatEndpoint(req, env);
+    if (url.pathname === '/api/chat/feedback' && req.method === 'POST') return chatFeedback(req, env);
     if (url.pathname === '/api/agenda') {
       const st = await env.KV.get<AgendaState>('agenda', 'json');
       return new Response(JSON.stringify(agendaResponse(st)), {
@@ -707,7 +784,10 @@ export default {
       const prices = await env.KV.get<PriceState>('price_state', 'json');
       const asst = await env.KV.get<AiState>('assistant', 'json');
       const agenda = await env.KV.get<AgendaState>('agenda', 'json');
+      const fb = (await env.KV.get<ChatFeedback[]>('chat_feedback', 'json')) ?? [];
       return json({
+        chat_feedback: { up: fb.filter((f) => f.rating === 1).length, down: fb.filter((f) => f.rating === -1).length,
+          with_unverified: fb.filter((f) => f.unverified.length).length, last_at: fb.at(-1)?.at ?? null },
         last: state?.last ?? null,
         seen: state ? Object.keys(state.seen).length : 0,
         prices: prices?.last ?? null,
@@ -733,6 +813,7 @@ export default {
       return;
     }
     if (event.cron === ASSISTANT_CRON) {
+      ctx.waitUntil(runHealthAlert(env).catch(() => {})); // uyarı gönderilemezse sonraki turda yeniden denenir
       ctx.waitUntil(
         runAssistant(env).catch(async (e: unknown) => {
           const st = await env.KV.get<AiState>('assistant', 'json');

@@ -119,6 +119,28 @@ def learned_model():
     return json.loads(learn.META_FILE.read_text(encoding="utf-8"))
 
 
+def _json_file(path: Path) -> dict | None:
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+@app.get("/api/health")
+def system_health():
+    """Sistem sağlığı (bulutta health.json; burada yerel veriyle hesaplanır)."""
+    from scanner import exits, health
+    prices = _load(PRICE_FILE)
+    news = pd.read_parquet(NEWS_FILE) if NEWS_FILE.exists() else None
+    score = assistant_track.evaluate(assistant_track.load_history(), prices)
+    return health.safe_build(_load(SCAN_FILE), prices, news, score, _json_file(learn.META_FILE),
+                             _json_file(exits.REPORT_JSON), health.kap_archive_days())
+
+
+@app.get("/api/changelog")
+def change_log():
+    """Değişiklik günlüğü (bulutta changelog.json)."""
+    from scanner import changelog
+    return changelog.entries()
+
+
 @app.get("/api/timemachine/{year}")
 def time_machine(year: str):
     """Zaman makinesi (bulutta timemachine/{yıl}.json; 'index' yıl listesini verir)."""

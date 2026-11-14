@@ -6,6 +6,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'r
 import { AgendaCard } from '@/components/AgendaCard';
 import { CandidateCard, rText, zoneStatus } from '@/components/CandidateCard';
 import { ExitsCard } from '@/components/ExitsCard';
+import { HealthBanner } from '@/components/HealthBanner';
 import { ModelCard } from '@/components/ModelCard';
 import { PaperCard } from '@/components/PaperCard';
 import { UsStrategyCard } from '@/components/UsStrategyCard';
@@ -16,7 +17,7 @@ import { usePortfolio } from '@/lib/portfolio';
 import { quoteKey, useQuotes } from '@/lib/quotes';
 import { regimeColors, useTheme } from '@/lib/theme';
 import type {
-  Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, ExitsReport, Market, ModelMeta, PaperReport,
+  Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, ExitsReport, Health, Market, ModelMeta, PaperReport,
   StockSummary,
   TradeStatus,
   UsStrategy,
@@ -36,6 +37,7 @@ export default function AssistantScreen() {
   const agenda = useApi<Agenda>('/api/agenda');
   const exitsRep = useApi<ExitsReport>('/api/exits');
   const paperRep = useApi<PaperReport>('/api/paper');
+  const health = useApi<Health>('/api/health');
   const usStrat = useApi<UsStrategy>(market === 'US' ? '/api/us_strategy' : null);
   const mk = data?.markets[market];
   const quotes = useQuotes(mk?.candidates ?? []);
@@ -43,13 +45,14 @@ export default function AssistantScreen() {
   return (
     <ScrollView
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); model.reload(); agenda.reload(); paperRep.reload(); }} />}>
+      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); model.reload(); agenda.reload(); paperRep.reload(); health.reload(); }} />}>
       <Segmented
         options={[{ value: 'BIST', label: 'BIST' }, { value: 'US', label: 'ABD' }]}
         value={market}
         onChange={setPicked}
       />
       <View style={{ height: 12 }} />
+      <HealthBanner health={health.data} market={market} />
       <Pressable onPress={() => router.push({ pathname: '/chat', params: { market } })}
         style={[styles.ask, { backgroundColor: t.card, borderColor: t.accent }]} accessibilityRole="button">
         <Ionicons name="chatbubbles-outline" size={20} color={t.accent} />

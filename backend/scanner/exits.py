@@ -86,7 +86,8 @@ def collect(workers: int | None = None) -> pd.DataFrame:
 def _stats(df: pd.DataFrame, name: str) -> dict:
     r, d = df[f"r_{name}"], df[f"d_{name}"]
     weekly = df.sort_values("quality", ascending=False).groupby(["market", "date"]).head(learn.TOP_K)
-    return {"n": int(len(r)), "avg_r": round(float(r.mean()), 3), "median_r": round(float(r.median()), 3),
+    return {"n": int(len(r)), "avg_r": round(float(r.mean()), 3), "std_r": round(float(r.std()), 3),
+            "median_r": round(float(r.median()), 3),
             "win": round(float((r > 0).mean()) * 100, 1), "avg_days": round(float(d.mean()), 1),
             "r_per_20d": round(float(r.sum() / d.sum() * 20), 3),
             "top5_r": round(float(weekly[f"r_{name}"].mean()), 3)}
@@ -122,7 +123,8 @@ def select(pol: dict, wf: dict) -> dict:
     name = best if ok else "base"
     return {"name": name, "desc": POLICIES[name][0], **POLICIES[name][1], "avg_r": pol[name]["avg_r"],
             "base_avg_r": base["avg_r"], "oos_r": wf["oos_chosen_r"], "oos_base_r": wf["oos_base_r"],
-            "win": pol[name]["win"], "avg_days": pol[name]["avg_days"], "n": pol[name]["n"]}
+            "win": pol[name]["win"], "avg_days": pol[name]["avg_days"], "n": pol[name]["n"],
+            "std_r": pol[name].get("std_r")}
 
 
 def report(df: pd.DataFrame) -> dict:

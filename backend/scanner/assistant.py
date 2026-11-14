@@ -329,8 +329,10 @@ def _stance(regime: dict, n: int, market: str, model_rejected: int = 0) -> str:
 
 
 def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData",
-               agenda: dict | None = None) -> dict:
-    """Piyasa başına günün adayları. scan: SideData ile zenginleştirilmiş tarama. agenda: fetch_agenda() çıktısı."""
+               agenda: dict | None = None, health: dict | None = None) -> dict:
+    """Piyasa başına günün adayları. scan: SideData ile zenginleştirilmiş tarama. agenda: fetch_agenda() çıktısı.
+    health: sistem sağlığı (health.build): veri sorunu olan piyasada aday verilmez; canlı sonuçlar testten belirgin
+    kötüyse (sapma alarmı) liste kısalır, pozisyon yarıya iner."""
     from . import exits, learn  # bu modülü kullanıyorlar (döngüsel içe aktarma olmasın)
     scorer = learn.Scorer(prices, scan)
     risk = (agenda or {}).get("risk")
@@ -357,6 +359,15 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         high_risk = market == "BIST" and risk and risk.get("level") == "Yüksek"
         if high_risk:
             limit, scale = min(limit, RISK_LIMIT), scale * RISK_SCALE
+        drift = ((health or {}).get("drift") or {}).get(market) or {}
+        drift_alarm = drift.get("status") == "alarm"
+        if drift_alarm:
+            limit, scale = min(limit, learn.FORM_LIMIT), scale * learn.FORM_SCALE
+        data_issue = next((c["detail"] for c in (health or {}).get("checks", [])
+                           if c.get("market") == market and c["status"] == "error" and c["id"].startswith(("fresh_", "age_"))),
+                          None)
+        if data_issue:
+            limit = 0
         pre = prefilter(g)
         pre = pre[[events.days_until(side.events.get(f"{market}:{s}")) is None
                    or not (0 <= events.days_until(side.events.get(f"{market}:{s}")) <= EARNINGS_BLACKOUT)
@@ -431,10 +442,16 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             "date": str(g["date"].max()),
             "regime": regime,
             "risk_scale": scale,
-            "stance": (f"Politik risk yüksek ({risk['score']}/100): {'; '.join(risk.get('notes', [])[:2])}. Liste "
+            "stance": (f"Veri sorunu: {data_issue}. Yanlış veriyle plan üretmemek için bugün aday verilmiyor. "
+                       if data_issue else "")
+                      + (f"Sapma alarmı: {drift['text']}. Liste kısaltıldı, önerilen pozisyon yarıya indirildi. "
+                         if drift_alarm else "")
+                      + (f"Politik risk yüksek ({risk['score']}/100): {'; '.join(risk.get('notes', [])[:2])}. Liste "
                        "kısaltıldı ve önerilen pozisyon yarıya indirildi. " if high_risk else "")
                       + stance(regime, len(picked), market, rejected, form)
                       + (f" {backtest['note']}" if backtest and backtest["note"] else ""),
+            "data_issue": data_issue,
+            "drift": drift or None,
             "political_risk": {k: risk.get(k) for k in ("score", "level", "notes")} if market == "BIST" and risk else None,
             "backtest": backtest,
             "form": {k: form[k] for k in ("recent_r", "recent_n", "recent_win", "long_r", "long_n", "effective")}
@@ -448,9 +465,9 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
 
 
 def build(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData",
-          generated_at: pd.Timestamp) -> dict:
+          generated_at: pd.Timestamp, health: dict | None = None) -> dict:
     agenda = fetch_agenda()
-    markets = candidates(scan, prices, overview, side, agenda)
+    markets = candidates(scan, prices, overview, side, agenda, health)
     # Sürüm: bulut bekçisi yeni liste geldiğini buradan anlar (yapay zekâ yorumu ve bildirim için)
     version = "|".join(f"{m}:{v['date']}:" + ",".join(c["symbol"] for c in v["candidates"])
                        for m, v in sorted(markets.items()))

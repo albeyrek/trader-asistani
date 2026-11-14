@@ -1,0 +1,220 @@
+"""Çekirdek hesapların birim testleri (ağ gerekmez): cd backend && python -m pytest -q"""
+import numpy as np
+import pandas as pd
+import pytest
+
+from scanner import assistant_track, health, kap_events, paper, prices, sectors
+
+
+def bars(rows, start="2026-01-05"):
+    """rows: (open, high, low, close) listesi -> iş günü tarihli mumlar."""
+    d = pd.bdate_range(start, periods=len(rows))
+    o, h, l, c = zip(*rows)
+    return pd.DataFrame({"date": d, "open": o, "high": h, "low": l, "close": c, "volume": 1e6})
+
+
+PLAN = {"symbol": "AAA", "setup": "pullback", "entry_low": 99.0, "entry_high": 101.0, "stop": 95.0, "target1": 110.0,
+        "close": 100.0, "rr": 2.0}
+
+
+# ------------------------------------------------------------------ asistan karnesi (çıkış kuralları)
+
+def test_target_hit():
+    b = bars([(100, 101, 99, 100), (101, 105, 100, 104), (104, 111, 103, 110)])
+    r = assistant_track.simulate(PLAN, b)
+    assert r["status"] == "target" and r["fill"] == 100.0
+    assert r["r"] == pytest.approx(2.0)  # (110-100)/(100-95)
+
+
+def test_stop_and_target_same_day_counts_as_stop():
+    b = bars([(100, 101, 99, 100), (100, 112, 94, 105)])
+    assert assistant_track.simulate(PLAN, b)["status"] == "stop"
+
+
+def test_gap_below_stop_exits_at_open():
+    b = bars([(100, 101, 99, 100), (92, 93, 90, 91)])
+    r = assistant_track.simulate(PLAN, b)
+    assert r["status"] == "stop" and r["exit"] == 92.0 and r["r"] == pytest.approx(-1.6)
+
+
+def test_not_filled_when_price_never_reaches_zone():
+    b = bars([(105, 107, 104, 106)] * 6)
+    assert assistant_track.simulate(PLAN, b)["status"] == "not_filled"
+
+
+def test_open_position_is_pending_result():
+    b = bars([(100, 101, 99, 100), (100, 102, 99, 101)])
+    r = assistant_track.simulate(PLAN, b)
+    assert r["status"] == "open" and r["exit"] is None and r["last"] == 101.0
+
+
+def test_trailing_stop_locks_profit():
+    rule = {"name": "trail3", "target": None, "hold": 60, "trail": 3.0}
+    c = {**PLAN, "atr": 2.0, "exit_rule": rule}
+    # 100'den 120'ye çıkıp 110'a düşüyor: iz süren stop = en yüksek kapanış 120 - 3x2 = 114
+    rows = [(100, 101, 99, 100)] + [(100 + 2 * i, 101 + 2 * i, 99 + 2 * i, 100 + 2 * i) for i in range(1, 11)]
+    rows += [(118, 118, 110, 111)]
+    r = assistant_track.simulate(c, bars(rows))
+    assert r["status"] == "trail" and r["exit"] == pytest.approx(114.0) and r["r"] > 0
+
+
+def test_run_exit_partial_and_breakeven():
+    o = np.array([100, 101, 104, 101.0])
+    h = np.array([101, 103, 106, 101.0])
+    l = np.array([99, 100, 103, 99.0])
+    c = np.array([100, 102, 105, 100.0])
+    # yarısı +1R'de (105) kapanır, stop girişe (100) çekilir; sonra 100'e düşer -> toplam 0.5R
+    r, days, px, how = assistant_track.run_exit(o, h, l, c, 0, 100.0, 95.0, None, 20, 2.0, None, 1.0, 1.0)
+    assert how == "stop" and px == 100.0 and r == pytest.approx(0.5)
+
+
+# ------------------------------------------------------------------ fiyat verisi doğrulama
+
+def _px(sym, rows, start="2026-01-05"):
+    return bars(rows, start).assign(yf_symbol=sym)
+
+
+def test_split_and_reverse_split_adjusted():
+    split = _px("SPL.IS", [(100, 101, 99, 100), (50, 51, 49, 50), (50, 52, 49, 51)])        # 2'ye bölünme
+    rev = _px("REV.IS", [(10, 10.5, 9.5, 10), (100, 101, 99, 100), (100, 102, 99, 101)])  # 10'u 1'e birleşme
+    us = _px("USX", [(100, 101, 99, 100), (50, 51, 49, 50)])                               # ABD'ye dokunulmaz
+    out = prices.fix_bist_splits(pd.concat([split, rev, us], ignore_index=True)).sort_values(["yf_symbol", "date"])
+    c = out.groupby("yf_symbol")["close"].apply(list)
+    assert c["SPL.IS"] == pytest.approx([50, 50, 51])
+    assert c["REV.IS"] == pytest.approx([100, 100, 101])
+    assert c["USX"] == pytest.approx([100, 50])
+
+
+def test_normal_limit_moves_not_adjusted():
+    s = _px("LIM.IS", [(100, 101, 99, 100), (110, 110, 110, 110), (99, 100, 98, 99)])  # tavan ve taban
+    out = prices.fix_bist_splits(s)
+    assert out["close"].tolist() == pytest.approx([100, 110, 99])
+
+
+def test_missing_latest_finds_stale_symbols():
+    df = pd.concat([_px("A.IS", [(1, 1, 1, 1)] * 5), _px("B.IS", [(1, 1, 1, 1)] * 4), _px("X", [(1, 1, 1, 1)] * 3),
+                    _px("Y", [(1, 1, 1, 1)] * 3), _px("USDTRY=X", [(1, 1, 1, 1)] * 2)], ignore_index=True)
+    assert prices.missing_latest(df, ["A.IS", "B.IS", "X", "Y", "USDTRY=X"]) == ["B.IS"]
+
+
+# ------------------------------------------------------------------ sanal portföy
+
+def _signal(day, **kw):
+    s = {"date": pd.Timestamp(day), "symbol": "AAA", "yf": "AAA.IS", "entry_low": 99.0, "entry_high": 101.0, "stop": 95.0,
+         "target1": 110.0, "atr": 2.0, "exit_rule": None, "risk_scale": 1.0}
+    return pd.DataFrame([{**s, **kw}])
+
+
+def _market(rows):
+    idx = _px("XU100.IS", [(1000, 1000, 1000, 1000)] * len(rows))
+    stock = _px("AAA.IS", rows).assign(volume=1e8)  # likidite sınırı devreye girmesin
+    return pd.concat([idx, stock], ignore_index=True)
+
+
+def test_paper_trade_with_costs():
+    px = _market([(100, 100, 100, 100)] * 25 + [(100, 101, 99, 100), (104, 111, 103, 110), (110, 110, 110, 110)])
+    rep = paper.simulate(_signal("2026-02-06"), px, "BIST")  # 25. gün (sinyal) sonrası alım
+    assert rep["trades"] == 1
+    t = rep["closed"][0]
+    assert t["how"] == "target" and t["r"] == pytest.approx(2.0)
+    shares = 100_000 * paper.RISK_PCT / 5  # risk 1.000 ₺ / hisse başı 5 ₺ risk = 200 lot
+    expected = shares * (110 * (1 - paper.COST["BIST"]) - 100 * (1 + paper.COST["BIST"]))
+    assert t["pnl"] == pytest.approx(expected, abs=0.01)
+
+
+def test_paper_no_buy_at_limit_up_open():
+    px = _market([(100, 100, 100, 100)] * 25 + [(100, 100, 100, 100), (110, 110, 100.5, 110)] + [(113, 114, 112, 113)] * 6)
+    rep = paper.simulate(_signal("2026-02-09", entry_low=100.0, entry_high=111.0), px, "BIST")
+    assert rep["trades"] == 0 and rep["open_count"] == 0
+
+
+# ------------------------------------------------------------------ KAP ve sektörler
+
+@pytest.mark.parametrize("subject,summary,expected", [
+    ("Sermaye Artırımı - Bedelsiz", "Yönetim kurulu bedelsiz sermaye artırımı kararı aldı", "bedelsiz_karar"),
+    ("SPK Bülteni", "Bedelsiz sermaye artırımı SPK tarafından onaylandı", "bedelsiz_onay"),
+    ("Pay Geri Alım Programı", "Geri alım programı başlatılmasına karar verildi", "geri_alim_program"),
+    ("Kar Payı Dağıtım İşlemlerine İlişkin Bildirim", "", "temettu"),
+    ("Yeni İş İlişkisi", "Sözleşme imzalandı", "yeni_is"),
+    ("Özel Durum Açıklaması (Genel)", "Genel kurul toplantısı yapıldı", None),
+])
+def test_kap_classify(subject, summary, expected):
+    assert kap_events.classify(subject, summary) == expected
+
+
+@pytest.mark.parametrize("sector,expected", [
+    ("Bankacılık", "banka"), ("Gayrimenkul Yatırım Ortaklıkları", "gyo"), ("Elektrik Gaz ve Buhar", "enerji"),
+    ("İletişim", "iletisim"), ("Demir, Çelik Temel", "metal"), (None, None), ("Bilinmeyen", None),
+])
+def test_agenda_sector(sector, expected):
+    assert sectors.agenda_sector(sector) == expected
+
+
+# ------------------------------------------------------------------ sistem sağlığı
+
+def _scan(dates_bist, dates_us):
+    rows = [{"market": "BIST", "symbol": f"B{i}", "yf_symbol": f"B{i}.IS", "date": d, "avg_turnover": 1.0}
+            for i, d in enumerate(dates_bist)]
+    rows += [{"market": "US", "symbol": f"U{i}", "yf_symbol": f"U{i}", "date": d, "avg_turnover": 1.0}
+             for i, d in enumerate(dates_us)]
+    return pd.DataFrame(rows)
+
+
+def test_health_blocks_market_with_missing_data():
+    from datetime import date
+    scan = _scan(["2026-11-13"] * 7 + ["2026-11-12"] * 3, ["2026-11-13"] * 10)
+    px = _px("B0.IS", [(1, 1, 1, 1)] * 3)
+    checks = {c["id"]: c for c in health.data_checks(scan, px, date(2026, 11, 16))}
+    assert checks["fresh_BIST"]["status"] == "error"     # %70 < %80
+    assert checks["fresh_US"]["status"] == "ok"
+    assert checks["age_US"]["status"] == "ok"           # cuma -> pazartesi: 1 iş günü
+
+
+def test_health_flags_bist_jump():
+    from datetime import date
+    scan = _scan(["2026-01-07"], ["2026-01-07"])
+    px = _px("JMP.IS", [(10, 10, 10, 10), (10, 10, 10, 10), (15, 15, 15, 15)])
+    checks = {c["id"]: c for c in health.data_checks(scan, px, date(2026, 1, 8))}
+    assert checks["jumps"]["status"] == "warn" and "JMP" in checks["jumps"]["detail"]
+
+
+def test_universe_shrink_warns(tmp_path, monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(health, "HISTORY_FILE", tmp_path / "h.json")
+    full = _scan(["2026-11-13"] * 100, ["2026-11-13"] * 100)
+    for day in (10, 11, 12):
+        health.universe_checks(full, date(2026, 11, day))
+    small = _scan(["2026-11-13"] * 60, ["2026-11-13"] * 100)
+    checks = {c["id"]: c for c in health.universe_checks(small, date(2026, 11, 13))}
+    assert checks["universe_BIST"]["status"] == "warn" and checks["universe_US"]["status"] == "ok"
+
+
+def test_drift_alarm():
+    exits_rep = {"selected": {"BIST": {"avg_r": 0.3, "std_r": 1.2}, "US": {"avg_r": 0.2}}}
+    score = {"BIST": {"closed_rs": [-1.0] * 12 + [0.5] * 8}, "US": {"closed_rs": [0.4] * 5}}
+    d = health.drift(score, exits_rep)
+    assert d["BIST"]["status"] == "alarm" and d["BIST"]["z"] < -2
+    assert d["US"]["status"] == "insufficient"
+    good = health.drift({"BIST": {"closed_rs": [0.3, -1, 2, 0.5, -1, 1.5] * 4}}, exits_rep)
+    assert good["BIST"]["status"] == "ok"
+
+
+# ------------------------------------------------------------------ değişiklik günlüğü
+
+def test_changelog_detects_rule_and_model_changes(tmp_path, monkeypatch):
+    from scanner import changelog
+    monkeypatch.setattr(changelog, "AUTO_FILE", tmp_path / "auto.json")
+    monkeypatch.setattr(changelog, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(changelog, "MANUAL_FILE", tmp_path / "manual.json")
+    (tmp_path / "manual.json").write_text('[{"date": "2026-11-01", "kind": "feature", "title": "A", "detail": "a"}]',
+                                          encoding="utf-8")
+    sel = lambda name, desc: {"selected": {"BIST": {"name": name, "desc": desc, "avg_r": 0.3, "base_avg_r": 0.1}}}  # noqa: E731
+    first = changelog.update({"reliable": False, "spec_text": "x"}, sel("base", "Plan"), "2026-11-10")
+    assert [e["title"] for e in first] == ["A"]  # ilk çalıştırma: karşılaştıracak durum yok
+    same = changelog.update({"reliable": False, "spec_text": "x"}, sel("base", "Plan"), "2026-11-11")
+    assert len(same) == 1
+    out = changelog.update({"reliable": True, "spec_text": "x", "last_decision": "model testte daha iyi"},
+                           sel("trail3", "İz süren stop"), "2026-11-14")
+    titles = [e["title"] for e in out]
+    assert titles[:2] == ["BIST çıkış kuralı değişti", "Öğrenen model sıralamayı devraldı"] and titles[-1] == "A"
+    assert "Önce: Plan. Şimdi: İz süren stop." in out[0]["detail"] and out[0]["auto"] and out[0]["kind_name"] == "Kural"

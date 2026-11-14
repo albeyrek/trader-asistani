@@ -26,6 +26,8 @@ function RootStack() {
         <Stack.Screen name="agenda" options={{ title: 'Gündem' }} />
         <Stack.Screen name="paper" options={{ title: 'Sanal portföy' }} />
         <Stack.Screen name="chat" options={{ title: 'Asistana sor' }} />
+        <Stack.Screen name="health" options={{ title: 'Sistem durumu' }} />
+        <Stack.Screen name="changelog" options={{ title: 'Değişiklik günlüğü' }} />
       </Stack>
     </>
   );

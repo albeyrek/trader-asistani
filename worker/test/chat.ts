@@ -1,5 +1,5 @@
 // Sohbet: hisse ve konu tespiti testi — npx tsx test/chat.ts
-import { detectIntents, detectSymbols } from '../src/chat';
+import { detectIntents, detectSymbols, referenceNumbers, verifyNumbers } from '../src/chat';
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -25,5 +25,26 @@ check('portföy niyeti', detectIntents('Portföyümdeki en riskli hisse hangisi?
 check('gündem niyeti', detectIntents('Gündemde neler var, faiz kararı ne olur?').includes('agenda'));
 check('aday niyeti', detectIntents('Bugün ne alayım?').includes('candidates'));
 check('performans niyeti', detectIntents('Sanal portföy nasıl gidiyor?').includes('performance'));
+// Rakam doğrulama: cevaptaki sayılar bağlamda var mı?
+const ctx = [
+  'THYAO: kapanış 312.75 TL, günlük değişim -2.4%, RSI 58.3, 52 hafta zirvesi 1234.5, piyasa değeri 431000000000',
+  'Plan: giriş 305.2-310.0, stop 296.4, ilk hedef 336.8, ortalama +0.42R, tarih 2026-11-13',
+].join('\n');
+const ref = referenceNumbers(ctx, 'THYAO alayım mı? 300 TL civarı mantıklı mı');
+const unv = (t: string) => verifyNumbers(t, ref).unverified;
+const okText = (name: string, t: string) => check(name, unv(t).length === 0, unv(t).join(','));
+okText('Türkçe ondalık', 'Kapanış 312,75 TL, RSI 58,3.');
+okText('yuvarlama kabul', 'Fiyat yaklaşık 313 TL, stop 296 civarında.');
+okText('binlik ayırıcı', '52 haftalık zirve 1.234,5 TL.');
+okText('yüzde ve eksi', 'Bugün %2,4 düştü; ortalama +0,42R.');
+okText('ölçek kelimesi', 'Piyasa değeri 431 milyar TL.');
+okText('tarih ve endeks adı', '13.11.2026 itibarıyla BIST 100 içinde, XU100 zayıf.');
+okText('sorudaki sayı', '300 TL seviyesi giriş bölgesinin altında.');
+okText('küçük sayılar ve madde no', '1. 3 nedenle temkinli ol\n2. 2R hedef');
+const fake = unv('Hedef fiyat 355,40 TL ve stop 288 TL.').join(',');
+check('uydurma fiyat yakalanır', fake === '355,40,288', fake);
+const fakePct = unv('Son ayda %17,3 yükseldi.').join(',');
+check('uydurma yüzde yakalanır', fakePct === '%17,3', fakePct);
+
 console.log(fail ? `\n${fail} test başarısız` : '\nTüm testler geçti');
 process.exit(fail ? 1 : 0);
