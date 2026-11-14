@@ -295,6 +295,7 @@ export interface RiskComponents {
   usdtry: number | null; // günlük değişim %
   xu100: number | null;
   xbank: number | null;
+  source?: 'google' | 'feeds' | 'none'; // başlık sayısının kaynağı (yoksa google: eski kayıtlar)
 }
 
 export interface PoliticalRisk {
@@ -304,13 +305,45 @@ export interface PoliticalRisk {
   notes: string[];
 }
 
-/** Şeffaf, basit puan: haber yoğunluğu (en fazla 50) + piyasa tepkisi (en fazla 50). */
+const SIX_H = 6 * 3600_000;
+export const POLITICAL_KEEP_MS = 7 * 86400_000; // gerilim başlıkları 7 gün tutulur (olağan seviye için)
+export const FEED_MIN_HISTORY_H = 24; // yayıncı akışlarının olağan seviyesi en az bu kadar veriyle kullanılır
+
+/** Siyasi gerilim başlığı yoğunluğu: son 6 saat ve olağan 6 saatlik ortalama (en fazla 7 gün).
+ *  since: sayımın başladığı an (yeni bir kaynakta ilk çekilen eski başlıklar olağan seviyeyi şişirmesin). */
+export function headlineRate(times: number[], now: number, since?: number):
+  { recent6h: number; baseline6h: number; spanH: number } {
+  const recent6h = times.filter((t) => now - t <= SIX_H).length;
+  if (since == null) {
+    const spanMs = Math.min(POLITICAL_KEEP_MS, Math.max(...times, now) - Math.min(...times, now)) || SIX_H;
+    return { recent6h, baseline6h: times.length / Math.max(1, spanMs / SIX_H), spanH: spanMs / 3600_000 };
+  }
+  const from = Math.max(since, now - POLITICAL_KEEP_MS);
+  const spanMs = Math.max(0, now - from);
+  const n = times.filter((t) => t >= from).length;
+  return { recent6h, baseline6h: n / Math.max(1, spanMs / SIX_H), spanH: spanMs / 3600_000 };
+}
+
+/** Şeffaf, basit puan: haber yoğunluğu (en fazla 50) + piyasa tepkisi (en fazla 50).
+ *  source: başlıkların kaynağı. google: konu aramaları (asıl ölçü); feeds: Google'a ulaşılamazken yayıncı akışları
+ *  (kendi olağan seviyeleriyle, yalnızca orana bakılır: hacimleri farklı); none: ölçülemedi (haber bileşeni 0). */
 export function politicalRisk(c: RiskComponents): PoliticalRisk {
   const notes: string[] = [];
+  const source = c.source ?? 'google';
   const ratio = c.headlines6h / Math.max(c.baseline6h, 2);
-  let news = Math.min(50, Math.max(0, (ratio - 1) * 15) + Math.max(0, c.headlines6h - 10) * 2);
-  if (c.headlines6h >= 25) news = 50;
-  if (news >= 15) notes.push(`Son 6 saatte ${c.headlines6h} siyasi gerilim başlığı (olağan: ~${Math.round(c.baseline6h)})`);
+  let news = 0;
+  if (source === 'google') {
+    news = Math.min(50, Math.max(0, (ratio - 1) * 15) + Math.max(0, c.headlines6h - 10) * 2);
+    if (c.headlines6h >= 25) news = 50;
+  } else if (source === 'feeds') {
+    news = Math.min(50, Math.max(0, (ratio - 1) * 15));
+  } else {
+    notes.push('Siyasi haber yoğunluğu şu an ölçülemiyor (haber kaynaklarına ulaşılamadı); puan yalnızca piyasa hareketinden');
+  }
+  if (news >= 15) {
+    notes.push(`Son 6 saatte ${c.headlines6h} siyasi gerilim başlığı (olağan: ~${Math.round(c.baseline6h)}`
+      + `${source === 'feeds' ? '; yayıncı akışlarından' : ''})`);
+  }
   let market = 0;
   if (c.usdtry != null && c.usdtry > 0.6) {
     market += Math.min(20, (c.usdtry - 0.6) * 15);

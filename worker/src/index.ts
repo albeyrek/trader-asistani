@@ -22,7 +22,7 @@ import {
   type AiState, type AssistantData, type AssistantMarket, type Candidate,
 } from './assistant';
 import {
-  aiSummary, calendar, FALLBACK_FEEDS, fetchFallback, fetchTopic, politicalRisk, riskMessage, summarize, TOPICS,
+  aiSummary, calendar, FALLBACK_FEEDS, FEED_MIN_HISTORY_H, fetchFallback, fetchTopic, headlineRate, POLITICAL_KEEP_MS, politicalRisk, riskMessage, summarize, TOPICS,
   type AgendaItem, type AiTheme, type PoliticalRisk,
 } from './agenda';
 import { answer, buildContext, referenceNumbers, verifyNumbers, type ChatRequest } from './chat';
@@ -40,7 +40,9 @@ const MAX_LIST_AGE_DAYS = 5; // daha eski aday listesi için gün içi takip yap
 // wrangler.toml'daki dördüncü cron ile aynı olmalı
 const AGENDA_CRON = '7-59/15 * * * *';
 const AGENDA_KEEP_MS = 48 * 3600_000; // başlıklar 48 saat tutulur
-const POLITICAL_KEEP_MS = 7 * 86400_000; // siyasi gerilim başlıkları 7 gün (olağan seviye için)
+// Google "canlı": iki konu grubu da (her biri 30 dakikada bir çekilir) son 75 dakikada en az bir kez alındı.
+// Değilse son 6 saatin sayımı eksik kalır; politik risk yayıncı akışlarının kendi olağan seviyesine göre ölçülür.
+const SOURCE_LIVE_MS = 75 * 60_000;
 const AGENDA_AI_EVERY_MS = 3 * 3600_000; // yapay zekâ özeti en sık 3 saatte bir
 const AGENDA_PAUSE_MS = 300; // Google konu aramaları arasında kısa bekleme (art arda istek engellenmesin)
 const RISK_NOTIFY_EVERY_MS = 12 * 3600_000; // yüksek risk bildirimi en sık 12 saatte bir
@@ -438,7 +440,11 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
 
 interface AgendaState {
   items: (AgendaItem & { seen: string })[]; // son 48 saat
-  political: Record<string, number>; // siyasi gerilim başlığı id -> ilk görülme zamanı (ms), 7 gün
+  political: Record<string, number>; // Google: siyasi gerilim başlığı id -> yayın zamanı (ms), 7 gün
+  politicalFeed?: Record<string, number>; // yayıncı akışları: aynı sayaç, ayrı olağan seviye
+  feedSince?: number; // yayıncı akışı sayımının başladığı an (ms)
+  googleOkAt?: (string | null)[]; // konu grubu başına Google'dan son başarılı çekim
+  feedOkAt?: string; // yayıncı akışlarından son başarılı çekim
   cursor: number; // konular iki gruba ayrılır, turlar sırayla birini çeker (alt istek sınırı)
   risk?: PoliticalRisk & { at: string };
   riskNotifiedAt?: string;
@@ -464,7 +470,8 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
   const st: AgendaState = (await env.KV.get<AgendaState>('agenda', 'json')) ?? structuredClone(EMPTY_AGENDA);
 
   // 1) Konuların yarısı (sırayla): her konu 30 dakikada bir yenilenir
-  const group = TOPICS.filter((_, i) => i % 2 === st.cursor % 2);
+  const groupNo = st.cursor % 2;
+  const group = TOPICS.filter((_, i) => i % 2 === groupNo);
   st.cursor = (st.cursor + 1) % 2;
   const known = new Set(st.items.map((it) => it.id));
   let fetched = 0;
@@ -479,8 +486,7 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
       known.add(it.id);
       st.items.push({ ...it, seen: at });
       fresh++;
-      // Politik risk sayacı yalnızca Google konu aramalarıyla beslenir: olağan seviye (7 günlük taban) aynı kaynak
-      // karışımıyla ölçülsün; yedek akışların farklı yoğunluğu sahte "yüksek risk" üretmesin
+      // Google sayacı yalnızca Google başlıklarıyla beslenir (yayıncı akışlarının sayacı ayrı: aşağıda)
       if (!it.fallback && it.themes.some((t) => t.theme === 'gerilim')) st.political[it.id] = Date.parse(it.published ?? at) || now;
     }
   };
@@ -499,29 +505,49 @@ async function runAgenda(env: Env): Promise<AgendaState['last']> {
       failReason ??= String(e).slice(0, 120);
     }
   }
-  // Google'ın yarısından fazlası alınamadıysa yayıncıların kendi akışları
+  const googleOk = failed * 2 <= group.length;
+  st.googleOkAt = [st.googleOkAt?.[0] ?? null, st.googleOkAt?.[1] ?? null];
+  if (googleOk) st.googleOkAt[groupNo] = at;
+
+  // Yayıncıların kendi akışları her turda çekilir: siyasi gerilim başlıkları ayrı bir sayaca yazılır (Google'a
+  // ulaşılamadığında politik risk bununla ölçülsün diye olağan seviyesi sürekli güncel kalır). Başlıklar gündem
+  // listesine yalnızca Google'ın yarısından fazlası alınamadığında eklenir (gündemin kaynak karışımı değişmesin).
+  st.politicalFeed ??= {};
+  st.feedSince ??= now;
   let fallback = 0;
-  if (failed * 2 > group.length) {
-    for (const feed of FALLBACK_FEEDS) {
-      try {
-        const before = fresh;
-        add(await fetchFallback(feed));
-        fallback += fresh - before;
-      } catch {
-        // tek bir yayıncıya ulaşılamaması önemli değil
+  let feedsOk = 0;
+  const feeds = await Promise.allSettled(FALLBACK_FEEDS.map((f) => fetchFallback(f)));
+  for (const res of feeds) {
+    if (res.status !== 'fulfilled') continue; // tek bir yayıncıya ulaşılamaması önemli değil
+    feedsOk++;
+    for (const it of res.value) {
+      if (it.themes.some((t) => t.theme === 'gerilim') && !(it.id in st.politicalFeed)) {
+        st.politicalFeed[it.id] = Date.parse(it.published ?? at) || now;
       }
     }
+    if (!googleOk) {
+      const before = fresh;
+      add(res.value);
+      fallback += fresh - before;
+    }
   }
+  if (feedsOk * 2 >= FALLBACK_FEEDS.length) st.feedOkAt = at;
   st.items = st.items.filter((it) => now - Date.parse(it.published ?? it.seen) <= AGENDA_KEEP_MS);
-  for (const [id, t] of Object.entries(st.political)) if (now - t > POLITICAL_KEEP_MS) delete st.political[id];
+  for (const reg of [st.political, st.politicalFeed]) {
+    for (const [id, t] of Object.entries(reg)) if (now - t > POLITICAL_KEEP_MS) delete reg[id];
+  }
 
-  // 2) Politik risk: son 6 saatin siyasi gerilim başlıkları (olağan seviyeye göre) + kur ve borsanın bugünkü hareketi
-  const times = Object.values(st.political);
-  const recent6h = times.filter((t) => now - t <= 6 * 3600_000).length;
-  const spanMs = Math.min(POLITICAL_KEEP_MS, Math.max(...times, now) - Math.min(...times, now)) || 6 * 3600_000;
-  const baseline = times.length / Math.max(1, spanMs / (6 * 3600_000));
+  // 2) Politik risk: son 6 saatin siyasi gerilim başlıkları (olağan seviyeye göre) + kur ve borsanın bugünkü hareketi.
+  // Google canlıysa asıl ölçü o; değilse yayıncı akışları (kendi olağan seviyeleri en az 24 saatlikse); ikisi de
+  // yoksa haber bileşeni ölçülemedi sayılır (eksik sayımla risk olduğundan düşük gösterilmesin).
+  const googleLive = st.googleOkAt.every((t) => t != null && now - Date.parse(t) <= SOURCE_LIVE_MS);
+  const g = headlineRate(Object.values(st.political), now);
+  const fr = headlineRate(Object.values(st.politicalFeed), now, st.feedSince);
+  const feedLive = !!st.feedOkAt && now - Date.parse(st.feedOkAt) <= SOURCE_LIVE_MS && fr.spanH >= FEED_MIN_HISTORY_H;
+  const source = googleLive ? 'google' : feedLive ? 'feeds' : 'none';
+  const rate = source === 'feeds' ? fr : g;
   const risk = politicalRisk({
-    headlines6h: recent6h, baseline6h: baseline,
+    headlines6h: rate.recent6h, baseline6h: rate.baseline6h, source,
     usdtry: await changePct('USDTRY=X', 'US'), xu100: await changePct('XU100.IS', 'BIST'), xbank: await changePct('XBANK.IS', 'BIST'),
   });
   const prevLevel = st.risk?.level;
@@ -819,6 +845,9 @@ export default {
         prices: prices?.last ?? null,
         alerts_today: prices ? Object.keys(prices.alerted).length : 0,
         agenda: agenda ? { ...agenda.last, items: agenda.items.length, risk: agenda.risk?.level, risk_score: agenda.risk?.score,
+          risk_source: agenda.risk?.components.source ?? 'google', google_ok_at: agenda.googleOkAt ?? null,
+          feed_ok_at: agenda.feedOkAt ?? null, feed_since: agenda.feedSince ? new Date(agenda.feedSince).toISOString() : null,
+          political: Object.keys(agenda.political).length, political_feed: Object.keys(agenda.politicalFeed ?? {}).length,
           ai_at: agenda.ai?.at ?? null } : null,
         assistant: asst ? { ...asst.last, version: asst.version, texts: Object.keys(asst.texts).length, notified: asst.notified } : null,
       });

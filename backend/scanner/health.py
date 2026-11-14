@@ -117,12 +117,18 @@ def worker_checks() -> list[dict]:
         err = part.get("error")
         # gündem: tüm kaynaklar başarısızsa (ör. haber sitesi bulut IP'lerini engelledi) gündem eskir
         unreachable = part.get("failed", 0) > 0 and not part.get("fetched")
-        status = "error" if age > limit_min * 4 else "warn" if age > limit_min or err or unreachable else "ok"
+        # politik risk: Google da yayıncı akışları da kullanılamıyorsa haber bileşeni ölçülemiyor (puan sadece piyasadan)
+        risk_blind = part.get("risk_source") == "none"
+        status = ("error" if age > limit_min * 4
+                  else "warn" if age > limit_min or err or unreachable or risk_blind else "ok")
         out.append(_check(cid, name, status, f"Son tur {age:.0f} dk önce" + (f"; hata: {str(err)[:80]}" if err else "")
                           + (f"; {part['failed']} kaynağın hiçbirine ulaşılamadı" if unreachable else "")
                           + (f" ({part['fail_reason']})" if unreachable and part.get("fail_reason") else "")
                           + ("; Google Haberler'e ulaşılamadı, yedek kaynaklar kullanıldı"
                              if part.get("fallback") is not None and part.get("failed", 0) * 2 > 7 and not unreachable
+                             else "")
+                          + ("; politik riskte başlık yoğunluğu ölçülemiyor (sadece piyasa hareketi)" if risk_blind
+                             else "; politik risk yayıncı akışlarıyla ölçülüyor" if part.get("risk_source") == "feeds"
                              else "")))
     return out
 

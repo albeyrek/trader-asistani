@@ -499,7 +499,9 @@ export interface YearRow {
 export interface PoliticalRisk {
   score: number; // 0-100
   level: 'Düşük' | 'Orta' | 'Yüksek';
-  components: { headlines6h: number; baseline6h: number; usdtry: number | null; xu100: number | null; xbank: number | null };
+  components: { headlines6h: number; baseline6h: number; usdtry: number | null; xu100: number | null; xbank: number | null;
+    /** başlık sayısının kaynağı: Google konu aramaları, yayıncı akışları (Google'a ulaşılamazken) ya da ölçülemedi */
+    source?: 'google' | 'feeds' | 'none' };
   notes: string[];
   at?: string;
 }

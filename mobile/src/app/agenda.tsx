@@ -111,7 +111,10 @@ function RiskCard({ risk }: { risk: NonNullable<Agenda['risk']> }) {
         <Text style={[styles.text, { color: t.text }]}>Siyasi gerilim başlıkları olağan seviyede, kur ve borsada olağandışı bir hareket yok.</Text>
       )}
       <Text style={[styles.small, { color: t.muted, marginTop: 6 }]}>
-        Son 6 saatte {comp.headlines6h} siyasi gerilim başlığı (olağan ~{Math.round(comp.baseline6h)}) · Dolar/TL {pct(comp.usdtry)} ·
+        {comp.source === 'none'
+          ? 'Siyasi başlık sayısı şu an ölçülemiyor'
+          : `Son 6 saatte ${comp.headlines6h} siyasi gerilim başlığı (olağan ~${Math.round(comp.baseline6h)}`
+            + `${comp.source === 'feeds' ? ', yayıncı akışlarından' : ''})`} · Dolar/TL {pct(comp.usdtry)} ·
         BIST 100 {pct(comp.xu100)} · Banka endeksi {pct(comp.xbank)} (bugün)
       </Text>
       <Text style={[styles.tiny, { color: t.muted, marginTop: 4 }]}>

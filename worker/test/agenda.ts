@@ -1,6 +1,6 @@
 // Gündem kurallarının testi: npx tsx test/agenda.ts   (canlı başlık örneği için: npx tsx test/agenda.ts --live)
 import {
-  calendar, classifyHeadline, FALLBACK_FEEDS, fallbackItems, fetchFallback, fetchTopic, parseAiThemes, politicalRisk,
+  calendar, classifyHeadline, FALLBACK_FEEDS, fallbackItems, fetchFallback, fetchTopic, headlineRate, parseAiThemes, politicalRisk,
   summarize, topicName, TOPICS, type AgendaItem,
 } from '../src/agenda';
 import { parseRss } from '../src/sources';
@@ -54,6 +54,23 @@ const shock = politicalRisk({ headlines6h: 30, baseline6h: 4, usdtry: 3.5, xu100
 check('şok gün yüksek risk', shock.level === 'Yüksek' && shock.notes.length >= 3, `${shock.score} ${shock.notes.join(' | ')}`);
 const newsOnly = politicalRisk({ headlines6h: 14, baseline6h: 4, usdtry: null, xu100: null, xbank: null });
 check('sadece haber yoğunluğu orta risk', newsOnly.level === 'Orta', `${newsOnly.score}`);
+// Kaynağa göre: yayıncı akışlarında yalnızca oran (mutlak sayı eşiği yok); ölçülemezse haber bileşeni 0 ve not
+const feedsHigh = politicalRisk({ headlines6h: 30, baseline6h: 25, usdtry: null, xu100: null, xbank: null, source: 'feeds' });
+check('yayıncı akışı: çok başlık ama olağan seviyede = düşük', feedsHigh.level === 'Düşük', `${feedsHigh.score}`);
+const feedsSpike = politicalRisk({ headlines6h: 30, baseline6h: 8, usdtry: null, xu100: null, xbank: null, source: 'feeds' });
+check('yayıncı akışı: olağanın ~4 katı = yüksek haber bileşeni', feedsSpike.score >= 40 && feedsSpike.notes[0].includes('yayıncı'),
+  `${feedsSpike.score} ${feedsSpike.notes.join(' | ')}`);
+const blind = politicalRisk({ headlines6h: 0, baseline6h: 5, usdtry: 3.5, xu100: null, xbank: null, source: 'none' });
+check('ölçülemedi: sadece piyasa, not var', blind.score === 20 && blind.notes[0].includes('ölçülemiyor'), `${blind.score} ${blind.notes.join(' | ')}`);
+// Olağan seviye: sayım başlangıcından (since) önceki başlıklar tabana katılmaz
+const h = 3600_000;
+const t0 = Date.parse('2026-11-14T00:00:00Z');
+const times = [t0 - 10 * h, t0 - 5 * h, ...Array.from({ length: 8 }, (_, i) => t0 + (i * 6 + 1) * h), t0 + 47 * h];
+const rr = headlineRate(times, t0 + 48 * h, t0);
+check('akış olağan seviyesi: 48 saatte 9 başlık = 6 saatte ~1,1', Math.abs(rr.baseline6h - 9 / 8) < 1e-9 && rr.spanH === 48 && rr.recent6h === 2,
+  JSON.stringify(rr));
+const gr = headlineRate([t0, t0 + 24 * h], t0 + 30 * h);
+check('Google olağan seviyesi (eski hesap)', Math.abs(gr.baseline6h - 2 / 5) < 1e-9 && gr.recent6h === 1, JSON.stringify(gr));
 
 // takvim
 const cal = calendar('2026-11-14', 45);
