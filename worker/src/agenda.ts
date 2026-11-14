@@ -233,6 +233,8 @@ export interface ThemeSummary {
   headlines: { title: string; url: string; source: string; published: string | null }[];
 }
 
+const MAX_PER_EFFECT = 3;
+
 export interface SectorImpact {
   sector: SectorId;
   name: string;
@@ -259,8 +261,8 @@ export function summarize(items: AgendaItem[], now = Date.now(), hours = 24): { 
       themes.set(th.theme, s);
       for (const e of variant.effects) {
         const x = sectors.get(e.sector) ?? { score: 0, reasons: new Map() };
-        x.score += e.dir;
-        x.reasons.set(`${variant.label} (${e.dir > 0 ? '+' : '−'})`, (x.reasons.get(`${variant.label} (${e.dir > 0 ? '+' : '−'})`) ?? 0) + 1);
+        const reason = `${variant.label} (${e.dir > 0 ? '+' : '−'})`;
+        x.reasons.set(reason, (x.reasons.get(reason) ?? 0) + 1);
         sectors.set(e.sector, x);
       }
     }
@@ -268,6 +270,10 @@ export function summarize(items: AgendaItem[], now = Date.now(), hours = 24): { 
   const themeList = [...themes.values()]
     .map((s) => ({ ...s, tone: Math.round((s.tone / s.count) * 100) / 100, variants: s.variants.sort((a, b) => b.count - a.count) }))
     .sort((a, b) => b.count - a.count);
+  // Aynı olayın onlarca başlığı (ör. 13 savaş haberi) puanı şişirmesin: her etki en fazla MAX_PER_EFFECT kez sayılır
+  for (const x of sectors.values()) {
+    x.score = [...x.reasons.entries()].reduce((a, [r, n]) => a + (r.endsWith('(+)') ? 1 : -1) * Math.min(n, MAX_PER_EFFECT), 0);
+  }
   const sectorList = [...sectors.entries()]
     .map(([sector, x]) => ({
       sector, name: SECTORS[sector].name, score: x.score,
