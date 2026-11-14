@@ -39,6 +39,23 @@ FORM_WEEKS_TEXT = "8 haftada"
 
 # Gündem (bulut bekçisi): politik risk "Yüksek" ise BIST listesi kısalır ve pozisyon yarıya iner
 RISK_LIMIT, RISK_SCALE = 2, 0.5
+def _backtest_summary(market: str) -> dict | None:
+    """2018'den beri test portföyünün özeti (paper.py); strateji endeksin belirgin gerisindeyse uyarı."""
+    from . import paper
+    if not paper.BACKTEST_FILE.exists():
+        return None
+    r = json.loads(paper.BACKTEST_FILE.read_text(encoding="utf-8")).get("markets", {}).get(market)
+    if not r or r.get("cagr_pct") is None:
+        return None
+    lagging = r["cagr_pct"] < r["index_cagr_pct"] - 3
+    pct = lambda v: f"%{v:.1f}".replace(".", ",")  # noqa: E731
+    note = (f"Uyarı: 2018'den beri test portföyünde bu strateji {('BIST 100' if market == 'BIST' else 'S&P 500')}'ün "
+            f"belirgin gerisinde kaldı (yıllık {pct(r['cagr_pct'])}, endeks {pct(r['index_cagr_pct'])}); önerileri bir "
+            "sistem olarak takip etmek yerine fikir listesi olarak kullanın.") if lagging else None
+    return {"cagr_pct": r["cagr_pct"], "index_cagr_pct": r["index_cagr_pct"], "max_dd_pct": r["max_dd_pct"],
+            "lagging": lagging, "note": note}
+
+
 def fetch_agenda() -> dict | None:
     """Bulut bekçisinin gündem özeti (politik risk, sektör etkisi). Ulaşılamazsa None: asistan gündemsiz devam eder."""
     try:
@@ -407,14 +424,17 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         radar = [c for c in rows if c not in picked][:RADAR_N]
         for c in picked:
             c["commentary"] = commentary(c, regime)
+        backtest = _backtest_summary(market)
         out[market] = {
             "date": str(g["date"].max()),
             "regime": regime,
             "risk_scale": scale,
             "stance": (f"Politik risk yüksek ({risk['score']}/100): {'; '.join(risk.get('notes', [])[:2])}. Liste "
                        "kısaltıldı ve önerilen pozisyon yarıya indirildi. " if high_risk else "")
-                      + stance(regime, len(picked), market, rejected, form),
+                      + stance(regime, len(picked), market, rejected, form)
+                      + (f" {backtest['note']}" if backtest and backtest["note"] else ""),
             "political_risk": {k: risk.get(k) for k in ("score", "level", "notes")} if market == "BIST" and risk else None,
+            "backtest": backtest,
             "form": {k: form[k] for k in ("recent_r", "recent_n", "recent_win", "long_r", "long_n", "effective")}
             if form else None,
             "ranking": "model" if scorer.reliable else "rules",

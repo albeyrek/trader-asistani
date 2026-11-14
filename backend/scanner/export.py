@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
-from . import assistant, assistant_track, exits, learn, scorecard, views
+from . import assistant, assistant_track, exits, learn, paper, scorecard, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -132,6 +132,12 @@ def export(out: Path) -> None:
     assistant_track.save_history(a_hist)
     _write(data / "assistant_history.json", a_hist)
     _write(data / "assistant_score.json", assistant_track.evaluate(a_hist, all_prices))
+    # Sanal portföy: canlı (asistanın gerçek listeleri, her gün) + 2018'den beri test (haftalık öğrenmede hesaplanır)
+    backtest_rep = json.loads(paper.BACKTEST_FILE.read_text(encoding="utf-8")) if paper.BACKTEST_FILE.exists() else None
+    _write(data / "paper.json", {"live": paper.live(a_hist, all_prices, yf_of), "backtest": backtest_rep,
+                                 "settings": {"capital": paper.CAPITAL, "cost_pct": {k: v * 100 for k, v in paper.COST.items()},
+                                              "risk_pct": paper.RISK_PCT * 100, "max_positions": paper.MAX_POSITIONS,
+                                              "participation_pct": paper.PARTICIPATION * 100}})
     # Öğrenen model: nasıl öğrendiği, test sonuçları, neye baktığı (haftalık eğitim: scanner/learn.py)
     if learn.META_FILE.exists():
         _write(data / "model.json", json.loads(learn.META_FILE.read_text(encoding="utf-8")))

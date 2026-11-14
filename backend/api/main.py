@@ -132,6 +132,19 @@ def time_machine(year: str):
     return tm[year]
 
 
+@app.get("/api/paper")
+def paper_portfolio():
+    """Sanal portföy (bulutta paper.json): canlı + 2018'den beri test."""
+    from scanner import paper
+    backtest = json.loads(paper.BACKTEST_FILE.read_text(encoding="utf-8")) if paper.BACKTEST_FILE.exists() else None
+    return {"live": paper.live(assistant_track.load_history(), _load(PRICE_FILE),
+                               {f"{r.market}:{r.symbol}": r.yf_symbol for r in _load(SCAN_FILE).itertuples()}),
+            "backtest": backtest, "settings": {"capital": paper.CAPITAL, "risk_pct": paper.RISK_PCT * 100,
+                                               "max_positions": paper.MAX_POSITIONS,
+                                               "cost_pct": {k: v * 100 for k, v in paper.COST.items()},
+                                               "participation_pct": paper.PARTICIPATION * 100}}
+
+
 @app.get("/api/exits")
 def exit_rules():
     """Çıkış kuralları karşılaştırması (bulutta exits.json)."""

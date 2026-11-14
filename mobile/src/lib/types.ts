@@ -310,6 +310,8 @@ export interface AssistantMarket {
   radar: RadarItem[];
   ranking?: 'model' | 'rules'; // sıralamayı öğrenen model mi, kurallar mı yaptı
   political_risk?: Pick<PoliticalRisk, 'score' | 'level' | 'notes'> | null; // sadece BIST
+  /** 2018'den beri test portföyünün özeti; strateji endeksin belirgin gerisindeyse uyarı */
+  backtest?: { cagr_pct: number; index_cagr_pct: number; max_dd_pct: number; lagging: boolean; note: string | null } | null;
   /** Strateji formu: asistanın planları son 8 haftada (geçmiş veride) ne kazandırdı; negatifse temkin modu */
   form?: { recent_r: number; recent_n: number; recent_win: number | null; long_r: number; long_n: number;
     effective?: boolean } | null;
@@ -557,4 +559,41 @@ export interface ExitsReport {
   policies: Partial<Record<Market | 'ALL', Record<string, ExitPolicyStats>>>;
   walk_forward: Partial<Record<Market | 'ALL', { years: { year: number; chosen: string; chosen_r: number; base_r: number; n: number;
     best_in_hindsight: string }[]; oos_chosen_r: number | null; oos_base_r: number | null }>>;
+}
+
+// ------------------------------------------------------------------ sanal portföy (backend/scanner/paper.py)
+
+export interface PaperResult {
+  market: Market;
+  currency: 'TRY' | 'USD';
+  capital: number;
+  start: string;
+  end: string;
+  equity: number;
+  return_pct: number;
+  index_return_pct: number;
+  cagr_pct: number | null;
+  index_cagr_pct: number | null;
+  max_dd_pct: number;
+  index_max_dd_pct: number;
+  trades: number;
+  open_count: number;
+  win_rate: number | null;
+  avg_r: number | null;
+  exposure_pct: number;
+  curve: [string, number, number][]; // tarih, portföy, aynı sermayeyle endeks
+  open: { symbol: string; entry_date: string; fill: number; last: number; stop: number; shares: number; value: number;
+    pnl_pct: number; r: number; days: number }[];
+  closed: { symbol: string; entry_date: string; fill: number; exit_date: string; exit: number; how: 'stop' | 'target' | 'time';
+    pnl: number; pnl_pct: number; r: number; days: number }[];
+  settings: { risk_pct: number; max_pos_pct: number; max_positions: number; cost_pct: number; entry_days: number };
+  rules_by_year?: Record<string, string>;
+  excluded?: string[];
+}
+
+export interface PaperReport {
+  live: Partial<Record<Market, PaperResult>>;
+  backtest: { generated_at: string; markets: Partial<Record<Market, PaperResult>> } | null;
+  settings: { capital: Record<Market, number>; risk_pct: number; max_positions: number; cost_pct: Record<Market, number>;
+    participation_pct: number };
 }

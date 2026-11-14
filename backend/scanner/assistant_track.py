@@ -50,7 +50,7 @@ def save_history(history: list[dict]) -> None:
 def record(history: list[dict], assistant: dict, yf_of: dict[str, str]) -> list[dict]:
     """Bugünün adaylarını ekler; aynı (piyasa, tarih) varsa yeniler. yf_of: "PİYASA:KOD" -> yahoo kodu."""
     for market, v in assistant["markets"].items():
-        snap = {"market": market, "date": v["date"], "regime": v["regime"]["label"],
+        snap = {"market": market, "date": v["date"], "regime": v["regime"]["label"], "risk_scale": v.get("risk_scale", 1.0),
                 "candidates": [{**{k: c[k] for k in PLAN_FIELDS}, **{k: c[k] for k in OPTIONAL_FIELDS if k in c},
                                 "yf": yf_of.get(f"{market}:{c['symbol']}")}
                                for c in v["candidates"]]}

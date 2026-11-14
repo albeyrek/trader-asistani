@@ -24,6 +24,7 @@ function RootStack() {
         <Stack.Screen name="screener" options={{ title: 'Filtreler' }} />
         <Stack.Screen name="timemachine" options={{ title: 'Zaman makinesi' }} />
         <Stack.Screen name="agenda" options={{ title: 'Gündem' }} />
+        <Stack.Screen name="paper" options={{ title: 'Sanal portföy' }} />
       </Stack>
     </>
   );

@@ -7,6 +7,7 @@ import { AgendaCard } from '@/components/AgendaCard';
 import { CandidateCard, rText, zoneStatus } from '@/components/CandidateCard';
 import { ExitsCard } from '@/components/ExitsCard';
 import { ModelCard } from '@/components/ModelCard';
+import { PaperCard } from '@/components/PaperCard';
 import { Card, Chip, Segmented, StateView } from '@/components/ui';
 import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
@@ -14,7 +15,8 @@ import { usePortfolio } from '@/lib/portfolio';
 import { quoteKey, useQuotes } from '@/lib/quotes';
 import { regimeColors, useTheme } from '@/lib/theme';
 import type {
-  Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, ExitsReport, Market, ModelMeta, StockSummary,
+  Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, ExitsReport, Market, ModelMeta, PaperReport,
+  StockSummary,
   TradeStatus,
 } from '@/lib/types';
 
@@ -31,13 +33,14 @@ export default function AssistantScreen() {
   const model = useApi<ModelMeta>('/api/model');
   const agenda = useApi<Agenda>('/api/agenda');
   const exitsRep = useApi<ExitsReport>('/api/exits');
+  const paperRep = useApi<PaperReport>('/api/paper');
   const mk = data?.markets[market];
   const quotes = useQuotes(mk?.candidates ?? []);
 
   return (
     <ScrollView
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); model.reload(); agenda.reload(); }} />}>
+      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); model.reload(); agenda.reload(); paperRep.reload(); }} />}>
       <Segmented
         options={[{ value: 'BIST', label: 'BIST' }, { value: 'US', label: 'ABD' }]}
         value={market}
@@ -52,6 +55,7 @@ export default function AssistantScreen() {
       ) : (
         <>
           <StanceCard mk={mk} market={market} />
+          <PaperCard rep={paperRep.data} market={market} />
           {mk.candidates.map((c) => (
             <CandidateCard key={c.symbol} c={c} quote={quotes[quoteKey(c.symbol, c.market)]} riskScale={mk.risk_scale} />
           ))}
