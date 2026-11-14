@@ -54,9 +54,11 @@ jobs:
       - run: npm ci
       - name: Tip denetimi
         run: npx tsc --noEmit
+      # parity (JS/Python sınıflandırıcı karşılaştırması) yerel haber verisinden üretilen örneklere ihtiyaç duyar
+      # (test/fixture.json depoda değil); yerelde çalıştırılır: npm run parity
       - name: Testler
         run: |
-          for t in assistant agenda chat health prices parity; do
+          for t in assistant agenda chat health prices; do
             echo "::group::$t"; npx tsx "test/$t.ts"; echo "::endgroup::"
           done
 
