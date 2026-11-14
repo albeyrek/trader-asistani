@@ -122,7 +122,31 @@ function Summary({ r, indexName, mode }: { r: PaperResult; indexName: string; mo
         {r.win_rate != null ? `; kârla kapanan %${f.num(r.win_rate, 0)}, işlem başına ortalama ${rText(r.avg_r)}` : ''}
         {`; sermayenin ortalama %${f.num(r.exposure_pct, 0)}’i yatırımda.`}
       </Text>
+      {r.idle_index ? <IdleIndex r={r} indexName={indexName} /> : null}
     </Card>
+  );
+}
+
+/** Boştaki para endekste tutulsaydı: aynı işlemler, nakit payı (%10 tampon hariç) haftada bir endeks fonuna. */
+function IdleIndex({ r, indexName }: { r: PaperResult; indexName: string }) {
+  const t = useTheme();
+  const ii = r.idle_index!;
+  const better = ii.return_pct > r.return_pct;
+  return (
+    <View style={[styles.idle, { borderTopColor: t.border }]}>
+      <Text style={[styles.small, { color: t.text, fontWeight: '700' }]}>Boştaki para {indexName} fonunda olsaydı</Text>
+      <View style={[styles.stats, { marginTop: 6 }]}>
+        <Stat label="Portföy" value={f.pct(ii.return_pct, 1)} sub={f.money(ii.equity, r.market)} color={ii.return_pct >= 0 ? t.up : t.down} />
+        <Stat label="Yıllık" value={ii.cagr_pct != null ? `%${f.num(ii.cagr_pct, 1)}` : '—'}
+          sub={r.cagr_pct != null ? `nakitte %${f.num(r.cagr_pct, 1)}` : undefined} color={better ? t.up : t.down} />
+        <Stat label="En büyük düşüş" value={f.pct(ii.max_dd_pct, 1)} sub={`nakitte ${f.pct(r.max_dd_pct, 1)}`} color={t.down} />
+      </View>
+      <Text style={[styles.small, { color: t.muted, marginTop: 6 }]}>
+        Aynı işlemler; sermayenin %10’u nakitte kalır, fazlası haftada bir endeks fonuna yatırılır, yeni alımda
+        gerekirse fon satılır (fon alım-satımı %0,1 maliyetli). Getiri artar ama düşüşler de derinleşir: eklenen
+        getiri, eklenen piyasa riskinin karşılığıdır. Kısa vadeli para için para piyasası fonu da bir seçenektir.
+      </Text>
+    </View>
   );
 }
 
@@ -143,6 +167,7 @@ const styles = StyleSheet.create({
   big: { fontSize: 18, fontWeight: '800', fontVariant: ['tabular-nums'] },
   tiny: { fontSize: 11 },
   small: { fontSize: 12, lineHeight: 17 },
+  idle: { marginTop: 10, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: StyleSheet.hairlineWidth },
   sym: { fontSize: 14, fontWeight: '700' },
   val: { fontSize: 14, fontWeight: '700', fontVariant: ['tabular-nums'] },

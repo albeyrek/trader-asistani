@@ -44,6 +44,12 @@ LIMIT_DOWN_LOCK = 0.905  # gün boyu tek fiyat ve kapanış %9,5 altındaysa sat
 # Likidite: pozisyon, hissenin son 20 günlük ortalama işlem hacminin (tutar) en fazla PARTICIPATION'ı kadar olabilir
 # (sığ hisselerde büyük pozisyon gerçekçi değil; bugün likit olan hisse geçmişte çok sığ olabilirdi)
 PARTICIPATION = 0.02
+# Boştaki nakit endekste (seçenek): haftada bir, sermayenin IDLE_BUFFER'ı nakitte kalacak şekilde fazlası endeks
+# fonuna (BYF) yatırılır; yeni alımda nakit yetmezse fon satılır ve nakit payı tamamlanır. Her alım-satım için
+# yeni pozisyonda fonu döndürmek maliyetle getiriyi yiyor (testte görüldü); bu yüzden tampon ve haftalık düzen.
+IDX_COST = 0.001        # endeks fonu alım-satım maliyeti (tek yön; komisyon + kayma)
+IDLE_BUFFER = 0.10      # nakitte tutulan pay
+IDLE_MIN_MOVE = 0.02    # bundan küçük fazlalık yatırılmaz
 
 
 def _bars(prices: pd.DataFrame, yf: str) -> pd.DataFrame | None:
@@ -66,9 +72,11 @@ def anomalies(prices: pd.DataFrame, market: str) -> set[str]:
 
 
 def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: str | None = None,
-             max_closed: int = 40) -> dict:
+             max_closed: int = 40, idle: str = "cash") -> dict:
     """signals: date (liste günü), symbol, yf, entry_low, entry_high, stop, target1, atr, exit_rule (dict|None),
-    risk_scale. Günlük adımlarla nakit, pozisyon ve özsermaye izlenir."""
+    risk_scale. Günlük adımlarla nakit, pozisyon ve özsermaye izlenir.
+    idle: boştaki para "cash" (getirisiz nakit) ya da "index" (gün sonunda endeks fonuna; yeni alım için açılışta
+    satılır; her yönde IDX_COST maliyet)."""
     idx = _bars(prices, MAIN_INDEX[market])
     if idx is None or signals.empty:
         return {}
@@ -84,6 +92,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
     bist = market == "BIST"
     cost = COST[market]
     cash = CAPITAL[market]
+    idle_units = 0.0  # boştaki paranın endeks fonundaki payı (idle="index")
     positions: dict[str, dict] = {}
     pending: dict[str, dict] = {}
     closed: list[dict] = []
@@ -94,7 +103,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
     invested_share = []
 
     def equity_at(d) -> float:
-        val = cash
+        val = cash + (idle_units * idx["close"].asof(d) if idle_units else 0.0)
         for p in positions.values():
             b = bars.get(p["yf"])
             px = b["close"].asof(d) if b is not None else p["fill"]
@@ -106,6 +115,9 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
         if d0 <= first:
             for s in g.itertuples():
                 pending[s.symbol] = {"s": s, "left": ENTRY_DAYS}
+
+    periods = days.to_period("W")
+    week_ends = {d for i, d in enumerate(days) if i == len(days) - 1 or periods[i + 1] != periods[i]}
 
     for d in days:
         # 1) açık pozisyonlarda çıkış
@@ -171,12 +183,21 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
                     scale = s.risk_scale if pd.notna(s.risk_scale) else 1.0
                     tv = b.loc[d, "tv"]
                     liquidity_cap = PARTICIPATION * tv / fill if pd.notna(tv) and tv > 0 else 0
+                    ix_open = idx.loc[d, "open"]
+                    avail = cash + idle_units * ix_open * (1 - IDX_COST)  # endeksteki para satılarak kullanılabilir
                     shares = math.floor(min(eq * RISK_PCT * scale / risk, eq * MAX_POS_PCT / fill,
-                                            cash / (fill * (1 + cost)), liquidity_cap))
+                                            avail / (fill * (1 + cost)), liquidity_cap))
                     if shares > 0:
                         rule = s.exit_rule if isinstance(s.exit_rule, dict) else assistant_track.BASE_RULE
                         target = s.target1 if rule["target"] == "plan" else (fill + rule["target"] * risk if rule["target"] else None)
-                        cash -= shares * fill * (1 + cost)
+                        need = shares * fill * (1 + cost)
+                        if need > cash and idle_units > 0:
+                            # eksik nakit için endeks payı açılışta satılır; nakit payı da tamamlanır (sık satış olmasın)
+                            want = need - cash + IDLE_BUFFER * eq
+                            sell = min(idle_units, want / (ix_open * (1 - IDX_COST)))
+                            idle_units -= sell
+                            cash += sell * ix_open * (1 - IDX_COST)
+                        cash -= need
                         positions[key] = {
                             "yf": s.yf, "shares": shares, "fill": fill, "risk": risk, "stop": s.stop, "cur_stop": s.stop,
                             "peak": fill, "target": target, "hold": rule["hold"], "trail": rule.get("trail"),
@@ -208,13 +229,21 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
             if s.symbol not in positions and s.symbol not in pending:
                 pending[s.symbol] = {"s": s, "left": ENTRY_DAYS}
 
-        # 4) özsermaye ve endeks
+        # 4) boştaki nakit (idle="index"): haftanın son günü, IDLE_BUFFER'ın üstündeki nakit endeks fonuna yatırılır
+        if idle == "index" and d in week_ends:
+            eq_now = equity_at(d)
+            excess = cash - IDLE_BUFFER * eq_now
+            if excess > IDLE_MIN_MOVE * eq_now:
+                idle_units += excess / (idx.loc[d, "close"] * (1 + IDX_COST))
+                cash -= excess
+
+        # 5) özsermaye ve endeks
         eq = equity_at(d)
         ix = index_units * idx.loc[d, "close"]
         peak_eq, peak_ix = max(peak_eq, eq), max(peak_ix, ix)
         max_dd = min(max_dd, eq / peak_eq - 1)
         max_dd_ix = min(max_dd_ix, ix / peak_ix - 1)
-        invested_share.append(1 - cash / eq if eq else 0)
+        invested_share.append(1 - (cash + idle_units * idx.loc[d, "close"]) / eq if eq else 0)  # hisselerdeki pay
         curve.append((d, eq, ix))
 
     last = days[-1]
@@ -232,7 +261,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
     years = max((last - days[0]).days / 365.25, 1e-9)
     step = 1 if len(curve) <= 400 else 5  # uzun testte haftalık nokta (dosya küçük kalsın)
     return {
-        "market": market, "currency": CURRENCY[market], "capital": CAPITAL[market],
+        "market": market, "currency": CURRENCY[market], "capital": CAPITAL[market], "idle": idle,
         "start": days[0].date().isoformat(), "end": last.date().isoformat(),
         "equity": round(eq_final, 2), "return_pct": round((eq_final / CAPITAL[market] - 1) * 100, 2),
         "index_return_pct": round((ix_final / CAPITAL[market] - 1) * 100, 2),
@@ -266,10 +295,21 @@ def live(history: list[dict], prices: pd.DataFrame, yf_of: dict[str, str]) -> di
                              "atr": c.get("atr"), "exit_rule": c.get("exit_rule"), "risk_scale": h.get("risk_scale", 1.0)})
         sig = pd.DataFrame(rows)
         if len(sig):
-            res = simulate(sig.dropna(subset=["yf"]), prices, market, start=str(sig["date"].min().date()))
+            sig = sig.dropna(subset=["yf"])
+            res = simulate(sig, prices, market, start=str(sig["date"].min().date()))
             if res:
+                res["idle_index"] = idle_summary(simulate(sig, prices, market, start=str(sig["date"].min().date()),
+                                                          idle="index"))
                 out[market] = res
     return out
+
+
+IDLE_FIELDS = ("equity", "return_pct", "cagr_pct", "max_dd_pct", "exposure_pct", "curve")
+
+
+def idle_summary(res: dict) -> dict | None:
+    """Aynı işlemler, boştaki para endekste tutularak: karşılaştırma için özet (ve getiri eğrisi)."""
+    return {k: res[k] for k in IDLE_FIELDS if k in res} if res else None
 
 
 # ------------------------------------------------------------------ test: 2018'den bugüne
@@ -298,6 +338,7 @@ def backtest() -> dict:
         })
         res = simulate(sig, prices, market, start=BACKTEST_START)
         if res:
+            res["idle_index"] = idle_summary(simulate(sig, prices, market, start=BACKTEST_START, idle="index"))
             res["rules_by_year"] = {str(y): r for y, r in sorted(wf.items())}
             res["excluded"] = sorted(s.removesuffix(".IS") for s in bad)
             out[market] = res
@@ -317,6 +358,10 @@ def main() -> None:
                   f"endeks {r['index_return_pct']:+.1f}% (yıllık {r['index_cagr_pct']}%) | en büyük düşüş {r['max_dd_pct']}% "
                   f"(endeks {r['index_max_dd_pct']}%) | {r['trades']} işlem, isabet %{r['win_rate']}, ort. {r['avg_r']}R, "
                   f"yatırımda ort. %{r['exposure_pct']}")
+            ii = r.get("idle_index")
+            if ii:
+                print(f"    boştaki nakit endekste: portföy {ii['return_pct']:+.1f}% (yıllık {ii['cagr_pct']}%) | "
+                      f"en büyük düşüş {ii['max_dd_pct']}%")
 
 
 if __name__ == "__main__":

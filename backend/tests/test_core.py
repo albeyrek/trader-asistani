@@ -218,3 +218,17 @@ def test_changelog_detects_rule_and_model_changes(tmp_path, monkeypatch):
     titles = [e["title"] for e in out]
     assert titles[:2] == ["BIST çıkış kuralı değişti", "Öğrenen model sıralamayı devraldı"] and titles[-1] == "A"
     assert "Önce: Plan. Şimdi: İz süren stop." in out[0]["detail"] and out[0]["auto"] and out[0]["kind_name"] == "Kural"
+
+
+def test_paper_idle_cash_in_index():
+    # Giriş bölgesine hiç gelmeyen sinyal: hisse alınmaz; endeks her gün %1 yükselir
+    n = 40
+    idx = bars([(1000 * 1.01 ** i, 1000 * 1.01 ** i, 1000 * 1.01 ** i, 1000 * 1.01 ** i) for i in range(n)]).assign(yf_symbol="XU100.IS")
+    stock = _px("AAA.IS", [(120, 121, 119, 120)] * n).assign(volume=1e8)
+    px = pd.concat([idx, stock], ignore_index=True)
+    sig = _signal("2026-01-06")
+    cash = paper.simulate(sig, px, "BIST")
+    inv = paper.simulate(sig, px, "BIST", idle="index")
+    assert cash["equity"] == pytest.approx(100_000)  # boştaki nakit getirisiz
+    assert inv["equity"] > 100_000 * 1.2  # haftalık olarak endekse yatırılan %90 yükselişten pay alır
+    assert inv["exposure_pct"] == pytest.approx(0)  # hisse payı yok (endeks hisse sayılmaz)

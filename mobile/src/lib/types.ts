@@ -630,6 +630,9 @@ export interface PaperResult {
   settings: { risk_pct: number; max_pos_pct: number; max_positions: number; cost_pct: number; entry_days: number };
   rules_by_year?: Record<string, string>;
   excluded?: string[];
+  /** Aynı işlemler, boştaki para (nakitte %10 tampon kalacak şekilde) haftalık olarak endeks fonunda tutulsaydı */
+  idle_index?: { equity: number; return_pct: number; cagr_pct: number | null; max_dd_pct: number; exposure_pct: number;
+    curve: [string, number, number][] } | null;
 }
 
 export interface PaperReport {
