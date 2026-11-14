@@ -166,8 +166,9 @@ function NotificationsCard() {
       </View>
       <View style={[styles.switchRow, { borderTopColor: t.border }]}>
         <Text style={[styles.text, { color: t.text, flex: 1 }]}>
-          Asistan: günün alım adayları hazır olunca (BIST akşam, ABD sabah), piyasa açılınca adayların durumu ve bir
-          adayın fiyatı plandaki stopun altına inerse bildir{mode === 'cloud' ? '' : ' (sadece bulut modunda)'}
+          Asistan: günün alım adayları hazır olunca (BIST akşam, ABD sabah), piyasa açılınca adayların durumu, bir
+          adayın fiyatı plandaki stopun altına inerse ve politik risk “Yüksek”e çıkarsa bildir
+          {mode === 'cloud' ? '' : ' (sadece bulut modunda)'}
         </Text>
         <Switch value={notifyAssistant} onValueChange={setNotifyAssistant} />
       </View>

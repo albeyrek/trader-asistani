@@ -62,7 +62,9 @@ function useNativeNotificationRouting() {
 
   useEffect(() => {
     const data = last?.notification.request.content.data as { symbol?: string; market?: Market; screen?: string } | undefined;
-    if (data?.screen === 'assistant') {
+    if (data?.screen === 'agenda') {
+      router.push('/agenda');
+    } else if (data?.screen === 'assistant') {
       router.navigate({ pathname: '/', params: { market: data.market ?? 'BIST' } });
     } else if (data?.symbol) {
       router.push({ pathname: '/stock/[symbol]', params: { symbol: data.symbol, market: data.market ?? 'BIST' } });

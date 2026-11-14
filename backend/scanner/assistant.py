@@ -10,8 +10,11 @@ import json
 
 import numpy as np
 import pandas as pd
+import requests
 
 from . import events, levels, views
+from .config import HTTP_HEADERS, WORKER_URL
+from .sectors import agenda_sector
 from .patterns import PIVOT_K, Pivots
 from .prices import to_weekly
 from .signals import DAILY, WEEKLY, prepare, score_at
@@ -33,6 +36,24 @@ REGIME_LIMITS = {
 BEAR_MIN_RS = 85          # zayıf/ayı piyasada sadece en güçlüler
 MIN_EXP_R = 0.05          # öğrenen model güvenilirse: beklenen getirisi bundan düşük aday listeye girmez
 FORM_WEEKS_TEXT = "8 haftada"
+
+# Gündem (bulut bekçisi): politik risk "Yüksek" ise BIST listesi kısalır ve pozisyon yarıya iner
+RISK_LIMIT, RISK_SCALE = 2, 0.5
+def fetch_agenda() -> dict | None:
+    """Bulut bekçisinin gündem özeti (politik risk, sektör etkisi). Ulaşılamazsa None: asistan gündemsiz devam eder."""
+    try:
+        r = requests.get(f"{WORKER_URL}/api/agenda", headers=HTTP_HEADERS, timeout=20)
+        return r.json() if r.ok else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def _agenda_check(impact: dict) -> dict:
+    good = impact["score"] > 0
+    return {"label": "Gündem", "ok": good,
+            "text": f"Son 24 saatin gündemi {impact['name'].lower()} için {'olumlu' if good else 'olumsuz'}: "
+                    + ", ".join(impact["reasons"][:2])}
+
 
 RADAR_N = 6
 RADAR_FIELDS = ("symbol", "market", "name", "close", "change_pct", "rs_rating", "setup", "setup_text", "entry_low",
@@ -281,10 +302,13 @@ def _stance(regime: dict, n: int, market: str, model_rejected: int = 0) -> str:
     return base + rel
 
 
-def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData") -> dict:
-    """Piyasa başına günün adayları. scan: SideData ile zenginleştirilmiş tarama."""
+def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData",
+               agenda: dict | None = None) -> dict:
+    """Piyasa başına günün adayları. scan: SideData ile zenginleştirilmiş tarama. agenda: fetch_agenda() çıktısı."""
     from . import learn  # learn bu modülü kullanıyor (döngüsel içe aktarma olmasın)
     scorer = learn.Scorer(prices, scan)
+    risk = (agenda or {}).get("risk")
+    impacts = {s["sector"]: s for s in (agenda or {}).get("sectors", [])}
     out: dict[str, dict] = {}
     for market, g in scan.groupby("market"):
         mk = overview.get(market)
@@ -296,6 +320,10 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         form = scorer.form(market)
         if form and form["recent_r"] <= 0 and form["effective"]:
             limit, scale = min(limit, learn.FORM_LIMIT), scale * learn.FORM_SCALE
+        # Politik risk (sadece BIST): yüksekse liste kısalır, pozisyon küçülür
+        high_risk = market == "BIST" and risk and risk.get("level") == "Yüksek"
+        if high_risk:
+            limit, scale = min(limit, RISK_LIMIT), scale * RISK_SCALE
         pre = prefilter(g)
         pre = pre[[events.days_until(side.events.get(f"{market}:{s}")) is None
                    or not (0 <= events.days_until(side.events.get(f"{market}:{s}")) <= EARNINGS_BLACKOUT)
@@ -324,6 +352,9 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             checks = _checks(r, plan, sector, regime, ev)
             if model:
                 checks.append(_model_check(model))
+            impact = impacts.get(agenda_sector(r.get("sector"))) if market == "BIST" else None
+            if impact:
+                checks.append(_agenda_check(impact))
             reasons = json.loads(r["daily_reasons"]) if isinstance(r.get("daily_reasons"), str) else []
             c = {
                 "symbol": r["symbol"], "market": market, "name": views.display_name(r["name"]),
@@ -363,7 +394,10 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             "date": str(g["date"].max()),
             "regime": regime,
             "risk_scale": scale,
-            "stance": stance(regime, len(picked), market, rejected, form),
+            "stance": (f"Politik risk yüksek ({risk['score']}/100): {'; '.join(risk.get('notes', [])[:2])}. Liste "
+                       "kısaltıldı ve önerilen pozisyon yarıya indirildi. " if high_risk else "")
+                      + stance(regime, len(picked), market, rejected, form),
+            "political_risk": {k: risk.get(k) for k in ("score", "level", "notes")} if market == "BIST" and risk else None,
             "form": {k: form[k] for k in ("recent_r", "recent_n", "recent_win", "long_r", "long_n", "effective")}
             if form else None,
             "ranking": "model" if scorer.reliable else "rules",
@@ -376,7 +410,7 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
 
 def build(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData",
           generated_at: pd.Timestamp) -> dict:
-    markets = candidates(scan, prices, overview, side)
+    markets = candidates(scan, prices, overview, side, fetch_agenda())
     # Sürüm: bulut bekçisi yeni liste geldiğini buradan anlar (yapay zekâ yorumu ve bildirim için)
     version = "|".join(f"{m}:{v['date']}:" + ",".join(c["symbol"] for c in v["candidates"])
                        for m, v in sorted(markets.items()))

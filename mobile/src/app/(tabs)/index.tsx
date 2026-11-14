@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { AgendaCard } from '@/components/AgendaCard';
 import { CandidateCard, rText, zoneStatus } from '@/components/CandidateCard';
 import { ModelCard } from '@/components/ModelCard';
 import { Card, Chip, Segmented, StateView } from '@/components/ui';
@@ -12,7 +13,7 @@ import { usePortfolio } from '@/lib/portfolio';
 import { quoteKey, useQuotes } from '@/lib/quotes';
 import { regimeColors, useTheme } from '@/lib/theme';
 import type {
-  AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, Market, ModelMeta, StockSummary, TradeStatus,
+  Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, Market, ModelMeta, StockSummary, TradeStatus,
 } from '@/lib/types';
 
 /** "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop] */
@@ -26,19 +27,21 @@ export default function AssistantScreen() {
   const { data, error, loading, reload } = useApi<AssistantData>('/api/assistant');
   const score = useApi<AssistantScore>('/api/assistant/score');
   const model = useApi<ModelMeta>('/api/model');
+  const agenda = useApi<Agenda>('/api/agenda');
   const mk = data?.markets[market];
   const quotes = useQuotes(mk?.candidates ?? []);
 
   return (
     <ScrollView
       contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); model.reload(); }} />}>
+      refreshControl={<RefreshControl refreshing={false} onRefresh={() => { reload(); score.reload(); model.reload(); agenda.reload(); }} />}>
       <Segmented
         options={[{ value: 'BIST', label: 'BIST' }, { value: 'US', label: 'ABD' }]}
         value={market}
         onChange={setPicked}
       />
       <View style={{ height: 12 }} />
+      <AgendaCard agenda={agenda.data} />
       {!data ? (
         <StateView loading={loading} error={error} empty="Asistan verisi henüz yok." onRetry={reload} />
       ) : !mk ? (

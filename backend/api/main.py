@@ -130,6 +130,15 @@ def time_machine(year: str):
     return tm[year]
 
 
+@app.get("/api/agenda")
+def agenda():
+    """Gündem bulut bekçisinde üretilir (worker/src/agenda.ts); yerel modda oradan aktarılır."""
+    data = assistant.fetch_agenda()
+    if data is None:
+        raise HTTPException(503, "Gündem alınamadı (bulut bekçisine ulaşılamadı)")
+    return data
+
+
 @app.get("/api/levels")
 def price_levels():
     """Bulutta levels.json ile aynı: "PİYASA:KOD" -> [yahoo kodu, son kapanış, destek, direnç, stop]."""

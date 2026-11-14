@@ -204,6 +204,7 @@ export interface MarketData {
   breadth_history: { d: string; a50: number; a200: number }[];
   outlook: Partial<Record<Outlook, number>>;
   sectors?: SectorRow[];
+  sector_rotation?: SectorRotationRow[];
   chart: Bar[];
 }
 
@@ -304,6 +305,7 @@ export interface AssistantMarket {
   candidates: Candidate[];
   radar: RadarItem[];
   ranking?: 'model' | 'rules'; // sıralamayı öğrenen model mi, kurallar mı yaptı
+  political_risk?: Pick<PoliticalRisk, 'score' | 'level' | 'notes'> | null; // sadece BIST
   /** Strateji formu: asistanın planları son 8 haftada (geçmiş veride) ne kazandırdı; negatifse temkin modu */
   form?: { recent_r: number; recent_n: number; recent_win: number | null; long_r: number; long_n: number;
     effective?: boolean } | null;
@@ -445,3 +447,88 @@ export interface YearRow {
   model_top_r: number | null;
   auc: number | null;
 }
+
+// ------------------------------------------------------------------ gündem (worker/src/agenda.ts)
+
+export interface PoliticalRisk {
+  score: number; // 0-100
+  level: 'Düşük' | 'Orta' | 'Yüksek';
+  components: { headlines6h: number; baseline6h: number; usdtry: number | null; xu100: number | null; xbank: number | null };
+  notes: string[];
+  at?: string;
+}
+
+export interface AgendaHeadline {
+  id: string;
+  title: string;
+  source: string;
+  url: string;
+  published: string | null;
+  topic: string;
+  themes: { theme: string; variant: string; tone: 1 | -1 }[];
+}
+
+export interface AgendaTheme {
+  theme: string;
+  name: string;
+  count: number;
+  tone: number; // -1..1
+  variants: { label: string; count: number; why: string }[];
+  headlines: { title: string; url: string; source: string; published: string | null }[];
+}
+
+export interface AgendaSectorImpact {
+  sector: string;
+  name: string;
+  score: number;
+  reasons: string[];
+}
+
+export interface AgendaAiTheme {
+  title: string;
+  summary: string;
+  tone: 'olumlu' | 'olumsuz' | 'karışık';
+  sectors: { sector: string; dir: 1 | -1; why: string }[];
+}
+
+export interface CalendarEvent {
+  date: string;
+  time: string;
+  title: string;
+  country: 'TR' | 'US';
+  note: string;
+}
+
+export interface Agenda {
+  updated_at: string | null;
+  risk: PoliticalRisk | null;
+  themes: AgendaTheme[];
+  sectors: AgendaSectorImpact[];
+  ai: { at: string; n: number; themes: AgendaAiTheme[] } | null;
+  calendar: CalendarEvent[];
+  headlines: AgendaHeadline[];
+  disclaimer: string;
+}
+
+/** Gündem sektörünün fiyat performansı: üye hisselerin medyanı (backend/scanner/sectors.py rotation). */
+export interface SectorRotationRow {
+  sector: string;
+  name: string;
+  count: number;
+  chg_1w: number;
+  chg_1m: number;
+  chg_3m: number;
+  rel_1w: number; // BIST 100'e göre fark (puan)
+  rel_1m: number;
+  rel_3m: number;
+  above_ema50: number; // 50 günlük ortalamanın üstündeki hisse oranı (%)
+  leaders: string[];
+}
+
+/** Gündem sektörlerinin adları (worker/src/agenda.ts SECTORS ile aynı). */
+export const SECTOR_NAMES: Record<string, string> = {
+  banka: 'Bankacılık', gyo: 'Gayrimenkul (GYO)', holding: 'Holdingler', sanayi: 'Sanayi', ihracat: 'İhracatçılar',
+  havacilik: 'Havacılık ve ulaştırma', turizm: 'Turizm', enerji: 'Elektrik ve enerji', petrol: 'Petrol ve rafineri',
+  metal: 'Metal ve demir-çelik', gida: 'Gıda', perakende: 'Perakende', iletisim: 'İletişim', savunma: 'Savunma',
+  insaat: 'İnşaat ve çimento', sigorta: 'Sigorta', otomotiv: 'Otomotiv', altin: 'Altın ve madencilik', genel: 'Borsa geneli',
+};

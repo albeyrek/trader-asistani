@@ -18,6 +18,8 @@ INDEX_SYMBOLS = {
 }
 # Her piyasanın ana endeksi (rejim ve göreli güç bununla hesaplanır)
 MAIN_INDEX = {"BIST": "XU100.IS", "US": "^GSPC"}
+# Bulut bekçisi (gündem ve politik risk buradan okunur)
+WORKER_URL = "https://trader-asistani.trader-asistani-worker.workers.dev"
 
 # Likidite filtresi: 20 günlük ortalama işlem hacmi (yerel para birimi cinsinden)
 MIN_AVG_TURNOVER = {"US": 1_000_000, "BIST": 10_000_000}  # 1M USD / 10M TL

@@ -6,6 +6,8 @@
 //  - piyasa saatlerinde 5 dakikada (ayrı cron): izlenen hisselerin fiyatı -> seviye kırılımı/sert hareket bildirimi
 //  - GET  /api/assistant : günün alım adayları + yapay zekâ yorumları
 //  - 10 dakikada bir (ayrı cron): yeni aday listesi için Workers AI yorumu, ardından liste bildirimi
+//  - GET  /api/agenda    : gündem (temalar, sektör etkisi, politik risk, yapay zekâ özeti, takvim)
+//  - 15 dakikada bir (ayrı cron): gündem başlıkları, politik risk; risk yükselince bildirim
 // Haber mantığı backend/scanner/watch.py ile aynıdır; kurallar ve eşikler GitHub Pages'teki watch_meta.json'dan gelir.
 
 import { Classifier, trLower, type Rules } from './classify';
@@ -17,7 +19,11 @@ import {
   AI_MODEL, candidateStatus, generate, listMessage, merge, openingMessage, pending, prune, quietHours, stoppedMessage,
   type AiState, type AssistantData, type AssistantMarket, type Candidate,
 } from './assistant';
-import { yahooSymbol, type Market, type Quote } from './quotes';
+import {
+  aiSummary, calendar, fetchTopic, politicalRisk, riskMessage, summarize, TOPICS,
+  type AgendaItem, type AiTheme, type PoliticalRisk,
+} from './agenda';
+import { fetchQuote, yahooSymbol, type Market, type Quote } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
 
 // wrangler.toml'daki ikinci cron ile aynı olmalı (UTC; BIST 07:00-15:10, ABD 13:30-21:00 arası)
@@ -27,6 +33,12 @@ const MAX_QUOTES = 40; // ücretsiz planda tur başına 50 alt istek sınırı
 const ASSISTANT_CRON = '2-59/10 * * * *';
 const AI_PER_RUN = 4; // tur başına en fazla bu kadar yorum (her biri ~10 sn)
 const MAX_LIST_AGE_DAYS = 5; // daha eski aday listesi için gün içi takip yapılmaz
+// wrangler.toml'daki dördüncü cron ile aynı olmalı
+const AGENDA_CRON = '7-59/15 * * * *';
+const AGENDA_KEEP_MS = 48 * 3600_000; // başlıklar 48 saat tutulur
+const POLITICAL_KEEP_MS = 7 * 86400_000; // siyasi gerilim başlıkları 7 gün (olağan seviye için)
+const AGENDA_AI_EVERY_MS = 3 * 3600_000; // yapay zekâ özeti en sık 3 saatte bir
+const RISK_NOTIFY_EVERY_MS = 12 * 3600_000; // yüksek risk bildirimi en sık 12 saatte bir
 
 export interface Env {
   KV: KVNamespace;
@@ -417,6 +429,127 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
   return last;
 }
 
+// ------------------------------------------------------------------ gündem
+
+interface AgendaState {
+  items: (AgendaItem & { seen: string })[]; // son 48 saat
+  political: Record<string, number>; // siyasi gerilim başlığı id -> ilk görülme zamanı (ms), 7 gün
+  cursor: number; // konular iki gruba ayrılır, turlar sırayla birini çeker (alt istek sınırı)
+  risk?: PoliticalRisk & { at: string };
+  riskNotifiedAt?: string;
+  ai?: { at: string; n: number; themes: AiTheme[] };
+  last?: { at: string; fetched: number; fresh: number; failed: number; sent: number; error?: string };
+}
+
+const EMPTY_AGENDA: AgendaState = { items: [], political: {}, cursor: 0 };
+
+async function changePct(yf: string, market: Market): Promise<number | null> {
+  try {
+    const q = await fetchQuote(yf, market);
+    // Sadece bugünün (son 20 saatin) işlemi: hafta sonu ve gece eski hareket risk sayılmasın
+    return q && Date.now() - Date.parse(q.time) < 20 * 3600_000 ? q.change_pct : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runAgenda(env: Env): Promise<AgendaState['last']> {
+  const now = Date.now();
+  const at = new Date(now).toISOString();
+  const st: AgendaState = (await env.KV.get<AgendaState>('agenda', 'json')) ?? structuredClone(EMPTY_AGENDA);
+
+  // 1) Konuların yarısı (sırayla): her konu 30 dakikada bir yenilenir
+  const group = TOPICS.filter((_, i) => i % 2 === st.cursor % 2);
+  st.cursor = (st.cursor + 1) % 2;
+  const known = new Set(st.items.map((it) => it.id));
+  let fetched = 0;
+  let fresh = 0;
+  let failed = 0;
+  for (const topic of group) {
+    try {
+      const items = await fetchTopic(topic);
+      fetched += items.length;
+      for (const it of items) {
+        if (known.has(it.id)) continue;
+        known.add(it.id);
+        st.items.push({ ...it, seen: at });
+        fresh++;
+        if (it.themes.some((t) => t.theme === 'gerilim')) st.political[it.id] = Date.parse(it.published ?? at) || now;
+      }
+    } catch {
+      failed++;
+    }
+  }
+  st.items = st.items.filter((it) => now - Date.parse(it.published ?? it.seen) <= AGENDA_KEEP_MS);
+  for (const [id, t] of Object.entries(st.political)) if (now - t > POLITICAL_KEEP_MS) delete st.political[id];
+
+  // 2) Politik risk: son 6 saatin siyasi gerilim başlıkları (olağan seviyeye göre) + kur ve borsanın bugünkü hareketi
+  const times = Object.values(st.political);
+  const recent6h = times.filter((t) => now - t <= 6 * 3600_000).length;
+  const spanMs = Math.min(POLITICAL_KEEP_MS, Math.max(...times, now) - Math.min(...times, now)) || 6 * 3600_000;
+  const baseline = times.length / Math.max(1, spanMs / (6 * 3600_000));
+  const risk = politicalRisk({
+    headlines6h: recent6h, baseline6h: baseline,
+    usdtry: await changePct('USDTRY=X', 'US'), xu100: await changePct('XU100.IS', 'BIST'), xbank: await changePct('XBANK.IS', 'BIST'),
+  });
+  const prevLevel = st.risk?.level;
+  st.risk = { ...risk, at };
+
+  // 3) Risk "Yüksek"e çıkınca bildirim (12 saatte en fazla bir kez, gece saatleri hariç)
+  let sent = 0;
+  const notifiedAgo = st.riskNotifiedAt ? now - Date.parse(st.riskNotifiedAt) : Infinity;
+  if (risk.level === 'Yüksek' && prevLevel !== 'Yüksek' && notifiedAgo > RISK_NOTIFY_EVERY_MS && !quietHours(now)) {
+    const top = st.items.filter((it) => it.themes.some((t) => t.theme === 'gerilim'))
+      .sort((a, b) => Date.parse(b.published ?? b.seen) - Date.parse(a.published ?? a.seen))[0];
+    const { title, body } = riskMessage(risk, top);
+    const devices = Object.entries(await listDevices(env)).filter(([, d]) => d.notify_assistant !== false);
+    const messages: PushMessage[] = devices.map(([token]) => ({
+      to: token, title, body, data: { screen: 'agenda' }, sound: 'default', priority: 'high', channelId: 'default',
+    }));
+    if (messages.length) sent = await send(messages, env);
+    st.riskNotifiedAt = at;
+  }
+
+  // 4) Yapay zekâ özeti: en sık 3 saatte bir, gece hariç, yeterince başlık varsa
+  const last24 = st.items.filter((it) => now - Date.parse(it.published ?? it.seen) <= 24 * 3600_000);
+  const aiAge = st.ai ? now - Date.parse(st.ai.at) : Infinity;
+  if (aiAge > AGENDA_AI_EVERY_MS && !quietHours(now) && last24.length >= 20) {
+    try {
+      // Etiketli (piyasaya dokunan) başlıklar önce, sonra en yeniler
+      const ordered = [...last24].sort((a, b) => (b.themes.length ? 1 : 0) - (a.themes.length ? 1 : 0)
+        || Date.parse(b.published ?? b.seen) - Date.parse(a.published ?? a.seen));
+      const themes = await aiSummary(env.AI, ordered);
+      if (themes) st.ai = { at, n: last24.length, themes };
+    } catch {
+      // kota ya da model hatası: kural tabanlı özet gösterilmeye devam eder
+    }
+  }
+
+  const last = { at, fetched, fresh, failed, sent };
+  st.last = last;
+  await env.KV.put('agenda', JSON.stringify(st));
+  return last;
+}
+
+function agendaResponse(st: AgendaState | null): unknown {
+  const items = st?.items ?? [];
+  const { themes, sectors } = summarize(items);
+  const istanbulToday = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10);
+  const headlines = [...items]
+    .sort((a, b) => Date.parse(b.published ?? b.seen) - Date.parse(a.published ?? a.seen))
+    .slice(0, 80)
+    .map(({ seen: _seen, ...it }) => it);
+  return {
+    updated_at: st?.last?.at ?? null,
+    risk: st?.risk ?? null,
+    themes, sectors,
+    ai: st?.ai ?? null,
+    calendar: calendar(istanbulToday),
+    headlines,
+    disclaimer: 'Gündem başlıkları otomatik toplanır; sektör etkileri genel eğilimlerdir, yatırım tavsiyesi değildir.',
+  };
+}
+
 // ------------------------------------------------------------------ asistan
 
 function ageDays(isoDate: string, now = Date.now()): number {
@@ -503,15 +636,24 @@ export default {
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=60' },
       });
     }
+    if (url.pathname === '/api/agenda') {
+      const st = await env.KV.get<AgendaState>('agenda', 'json');
+      return new Response(JSON.stringify(agendaResponse(st)), {
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=120' },
+      });
+    }
     if (url.pathname === '/api/status') {
       const state = await env.KV.get<State>('state', 'json');
       const prices = await env.KV.get<PriceState>('price_state', 'json');
       const asst = await env.KV.get<AiState>('assistant', 'json');
+      const agenda = await env.KV.get<AgendaState>('agenda', 'json');
       return json({
         last: state?.last ?? null,
         seen: state ? Object.keys(state.seen).length : 0,
         prices: prices?.last ?? null,
         alerts_today: prices ? Object.keys(prices.alerted).length : 0,
+        agenda: agenda ? { ...agenda.last, items: agenda.items.length, risk: agenda.risk?.level, risk_score: agenda.risk?.score,
+          ai_at: agenda.ai?.at ?? null } : null,
         assistant: asst ? { ...asst.last, version: asst.version, texts: Object.keys(asst.texts).length, notified: asst.notified } : null,
       });
     }
@@ -519,6 +661,17 @@ export default {
   },
 
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (event.cron === AGENDA_CRON) {
+      ctx.waitUntil(
+        runAgenda(env).catch(async (e: unknown) => {
+          const st = await env.KV.get<AgendaState>('agenda', 'json');
+          if (!st) return;
+          st.last = { ...(st.last ?? { fetched: 0, fresh: 0, failed: 0, sent: 0 }), at: new Date().toISOString(), error: String(e) };
+          await env.KV.put('agenda', JSON.stringify(st));
+        }),
+      );
+      return;
+    }
     if (event.cron === ASSISTANT_CRON) {
       ctx.waitUntil(
         runAssistant(env).catch(async (e: unknown) => {

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from . import views
+from . import sectors as sector_mod
 from .config import INDEX_SYMBOLS, MAIN_INDEX
 
 HISTORY_DAYS = 126  # genişlik geçmişi (≈6 ay)
@@ -122,6 +123,7 @@ def overview(prices: pd.DataFrame, scan: pd.DataFrame, sectors: dict[str, list[d
             "breadth_history": br_hist,
             "outlook": g["outlook"].value_counts().to_dict(),
             "sectors": (sectors or {}).get(market, []),
+            "sector_rotation": sector_mod.rotation(prices, scan, main) if market == "BIST" else [],
             "chart": views.chart(main_px, (20, 50, 200), views.DAILY_BARS),
         }
     return out

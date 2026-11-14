@@ -92,7 +92,7 @@ function tag(item: string, name: string): string {
   return m ? decode(m[1]) : '';
 }
 
-async function rss(url: string): Promise<{ title: string; url: string; published: string | null }[]> {
+export async function rss(url: string): Promise<{ title: string; url: string; published: string | null }[]> {
   const r = await fetch(url, { headers: UA });
   if (!r.ok) throw new Error(`RSS HTTP ${r.status}`);
   const xml = await r.text();
