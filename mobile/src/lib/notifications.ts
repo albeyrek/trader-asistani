@@ -68,6 +68,8 @@ function useNativeNotificationRouting() {
       router.push('/health');
     } else if (data?.screen === 'plans') {
       router.push('/plans');
+    } else if (data?.screen === 'paper') {
+      router.push({ pathname: '/paper', params: { market: data.market ?? 'BIST' } });
     } else if (data?.screen === 'assistant') {
       router.navigate({ pathname: '/', params: { market: data.market ?? 'BIST' } });
     } else if (data?.symbol) {

@@ -170,7 +170,7 @@ function NotificationsCard() {
       </View>
       <View style={[styles.switchRow, { borderTopColor: t.border }]}>
         <Text style={[styles.text, { color: t.text, flex: 1 }]}>
-          Asistan: hafta içi 09:30’da sabah özeti, günün alım adayları hazır olunca (BIST akşam, ABD sabah), piyasa
+          Asistan: hafta içi 09:30’da sabah özeti, cuma akşamı haftalık karne, günün alım adayları hazır olunca (BIST akşam, ABD sabah), piyasa
           açılınca adayların durumu, bir adayın fiyatı plandaki stopun altına inerse, takipteki planlarında stop
           yükselince ya da çıkış zamanı gelince ve politik risk “Yüksek”e çıkarsa bildir
           {mode === 'cloud' ? '' : ' (sadece bulut modunda)'}
