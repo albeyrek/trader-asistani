@@ -73,7 +73,18 @@ def breadth(prices: pd.DataFrame, symbols: list[str]) -> tuple[dict, list[dict]]
     return now, history
 
 
-def regime(index: dict, br: dict) -> dict:
+# BIST'te zayıf/ayı piyasa metni: 2018'den beri testte bu dönemlerdeki kurulumlar ortalamada en iyi sonucu verdi
+# (bkz. assistant.BEAR_MIN_RS_MARKETS); genel metin ("sinyaller başarısız olabilir") BIST için yanıltıcı olur
+BIST_WEAK_TEXT = {
+    "Zayıf": "Hisselerin çoğu düşüşte. 2018'den beri testte BIST'te bu dönemlerde açılan işlemler ortalamada iyi sonuç "
+             "verdi ama dalgalanma yüksek: pozisyonu küçük tutmak ve stoplara sıkı uymak gerekir.",
+    "Ayı": "Endeks düşüş trendinde ve satış geniş tabanlı. 2018'den beri testte BIST'te bu dönemlerdeki kurulumlar "
+           "ortalamada iyi sonuç verdi (sert düşüşlerin ardından güçlü toparlanmalar), ama stoplar sık çalışır: "
+           "pozisyonu küçük tutmak ve stoplara sıkı uymak gerekir.",
+}
+
+
+def regime(index: dict, br: dict, market: str | None = None) -> dict:
     """Beş bileşenin her biri +1 / 0 / -1; toplam -5..+5 -> etiket."""
     parts = [
         ("Endeks 200 günlük ortalamanın " + ("üstünde" if index["above_ema200"] else "altında"),
@@ -91,6 +102,8 @@ def regime(index: dict, br: dict) -> dict:
                   1 if hi > 2 * lo and hi >= 5 else -1 if lo > 2 * hi and lo >= 5 else 0))
     score = sum(p for _, p in parts)
     label, text = next((lab, txt) for th, lab, txt in REGIMES if score >= th)
+    if market == "BIST":
+        text = BIST_WEAK_TEXT.get(label, text)
     return {
         "score": score,
         "label": label,
@@ -117,7 +130,7 @@ def overview(prices: pd.DataFrame, scan: pd.DataFrame, sectors: dict[str, list[d
         g = scan[scan["market"] == market]
         out[market] = {
             "index_name": idx[main],
-            "regime": regime(main_snap, br_now),
+            "regime": regime(main_snap, br_now, market),
             "indices": indices,
             "breadth": br_now,
             "breadth_history": br_hist,
