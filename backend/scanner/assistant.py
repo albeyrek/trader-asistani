@@ -33,7 +33,12 @@ MAX_RISK_PCT = 12         # girişten stopa en fazla %12
 REGIME_LIMITS = {
     "Boğa": (8, 1.0), "Temkinli boğa": (7, 1.0), "Nötr": (5, 0.75), "Zayıf": (4, 0.5), "Ayı": (3, 0.5),
 }
-BEAR_MIN_RS = 85          # zayıf/ayı piyasada sadece en güçlüler
+BEAR_MIN_RS = 85          # zayıf/ayı piyasada sadece en güçlüler...
+# ...ama yalnızca ABD'de. 2018'den beri sanal portföy testinde (rejim her hafta yeniden hesaplanarak) BIST'te bu filtre
+# yılda ~4 puan getiri kaybettirdi ve düşüşü azaltmadı: BIST'te zayıf/ayı piyasadaki kurulumlar ortalamada en iyi R'yi
+# verdi (+0,8R; boğada +0,5R). Liste sınırı ve pozisyon çarpanı düşüşü azalttığı için iki piyasada da kalıyor.
+# (liste+çarpan+RS85: yıllık %41,5, düşüş %29,4 -> liste+çarpan: %45,5, düşüş %28,2; ABD'de filtre zararsız)
+BEAR_MIN_RS_MARKETS = {"US"}
 MIN_EXP_R = 0.05          # öğrenen model güvenilirse: beklenen getirisi bundan düşük aday listeye girmez
 FORM_WEEKS_TEXT = "8 haftada"
 
@@ -324,6 +329,10 @@ def _stance(regime: dict, n: int, market: str, model_rejected: int = 0) -> str:
         "Zayıf": "Hisselerin çoğu düşüşte; sadece en güçlü hisseler listelendi, pozisyonu yarıya indirmek mantıklı olabilir.",
         "Ayı": "Piyasa düşüş trendinde; aşağıdakiler sadece en güçlü istisnalar. Pozisyonu yarıya indirmek ve stoplara sıkı uymak gerekir.",
     }[label]
+    if market == "BIST" and label in ("Zayıf", "Ayı"):
+        # BIST'te göreli güç eşiği yükseltilmiyor (bkz. BEAR_MIN_RS_MARKETS): metin buna göre
+        base = ("Hisselerin çoğu düşüşte; liste kısaltıldı ve önerilen pozisyon yarıya indirildi. 2018'den beri testte "
+                "BIST'te zayıf piyasadaki kurulumlar ortalamada iyi sonuç verdi ama dalgalanma yüksek: stoplara sıkı uyun.")
     rel = " ABD'de teknik skorun geçmiş başarısı düşük; adayları ek araştırmayla değerlendirin." if market == "US" else ""
     return base + rel
 
@@ -421,7 +430,7 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
                 c["exit_note"] = exit_note
             c["quality"] = _quality(r, plan, checks)
             rows.append(c)
-        min_rs = BEAR_MIN_RS if regime["label"] in ("Zayıf", "Ayı") else MIN_RS
+        min_rs = BEAR_MIN_RS if regime["label"] in ("Zayıf", "Ayı") and market in BEAR_MIN_RS_MARKETS else MIN_RS
         rejected = 0
         if scorer.reliable:
             # Öğrenen model testten geçtiyse sıralamayı o yapar ve beklenen getirisi düşük adayları eler

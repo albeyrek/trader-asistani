@@ -36,5 +36,9 @@
   {"date": "2026-11-15", "kind": "feature", "title": "Plan takibi ve çıkış bildirimleri",
    "detail": "Aday kartında \"Bu planla aldım\" denen hisselerin stopu her taramadan sonra asistanın test edilmiş çıkış kuralıyla güncelleniyor (iz süren stop yalnızca yükselir). Stop yükselince, gün içinde stop kırılınca ya da hedef/süre dolunca bildirim geliyor. Buluta yalnızca plan gidiyor; adet ve maliyet telefonda kalıyor."},
   {"date": "2026-11-15", "kind": "feature", "title": "Sabah özeti",
-   "detail": "Hafta içi 09:30'da tek bildirim: günün listesi ve giriş bölgesindekiler, politik risk, günün takvimi (PPK, TÜİK, Fed), stopa yaklaşan planlar ve varsa sistem uyarısı."}
+   "detail": "Hafta içi 09:30'da tek bildirim: günün listesi ve giriş bölgesindekiler, politik risk, günün takvimi (PPK, TÜİK, Fed), stopa yaklaşan planlar ve varsa sistem uyarısı."},
+  {"date": "2026-11-15", "kind": "rule", "title": "BIST: zayıf piyasada göreli güç eşiği kaldırıldı",
+   "detail": "2018'den beri testte (piyasa rejimi her hafta yeniden hesaplanarak) BIST'te zayıf ve ayı piyasadaki kurulumlar ortalamada en iyi sonucu verdi (+0,8R; boğada +0,5R). Zayıf piyasada yalnızca göreli gücü 85+ hisseleri almak yılda ~4 puan getiri kaybettiriyordu. Kaldırılınca test portföyü yıllık %41,5'ten %45,5'e çıktı, en büyük düşüş %29,4'ten %28,2'ye indi (9 yılın 7'sinde daha iyi). Liste sınırı ve pozisyonu yarıya indirme düşüşü azalttığı için kalıyor; ABD'de kural değişmedi."},
+  {"date": "2026-11-15", "kind": "data", "title": "Sanal portföy testi canlı kurallarla",
+   "detail": "2018'den beri test artık canlı asistanın rejim kurallarını da uyguluyor (zayıf piyasada kısa liste ve küçük pozisyon). Böylece test, asistanın gerçekte yaptığını gösteriyor: BIST yıllık %45,5 (BIST 100 %28,8), en büyük düşüş %28,2 (endeks %31,8)."}
 ]

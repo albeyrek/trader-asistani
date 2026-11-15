@@ -314,10 +314,25 @@ def idle_summary(res: dict) -> dict | None:
 
 # ------------------------------------------------------------------ test: 2018'den bugüne
 
+def regime_labels(g: pd.DataFrame, prices: pd.DataFrame, market: str) -> pd.Series:
+    """Asistanın piyasa rejimi (market.regime) geçmişteki her örnek günü için: endeks 200 günlük ortalamanın üstünde
+    mi, endeksin 50 günlük ortalaması yükseliyor mu, 200 ve 50 günlük ortalamanın üstündeki hisse oranı. (Yeni
+    zirve/dip bileşeni örneklerde yok; puan -4..+4 aralığında, etiket eşikleri aynı.)"""
+    from .market import REGIMES
+    idx = prices[prices["yf_symbol"] == MAIN_INDEX[market]].set_index("date")["close"].sort_index()
+    e50 = idx.ewm(span=50, adjust=False).mean()
+    rising = g["date"].map((e50 > e50.shift(10)).astype(int) * 2 - 1).fillna(0)
+    breadth = lambda s: np.where(s >= 60, 1, np.where(s <= 40, -1, 0))  # noqa: E731
+    score = (g["ctx_idx_above200"].fillna(1) * 2 - 1) + rising + breadth(g["ctx_above200"]) + breadth(g["ctx_above50"])
+    return pd.Series([next(lab for th, lab, _ in REGIMES if s >= th) for s in score], index=g.index)
+
+
 def backtest() -> dict:
     """Yeniden oynatma örneklerinden her hafta canlı süzgeçten geçen ilk BACKTEST_TOP_K kurulum (asistanın sıralaması);
-    çıkış kuralı her yıl, o yıldan önceki yıllarda en iyi olan kuraldır (exits.py kayan seçim: geleceği görmeden)."""
-    from . import exits, history as hist, learn
+    çıkış kuralı her yıl, o yıldan önceki yıllarda en iyi olan kuraldır (exits.py kayan seçim: geleceği görmeden).
+    Canlı asistanın rejim kuralları da uygulanır: zayıf piyasada liste kısalır ve pozisyon küçülür (REGIME_LIMITS),
+    ABD'de zayıf/ayı piyasada yalnızca göreli gücü yüksek hisseler (BEAR_MIN_RS)."""
+    from . import assistant, exits, history as hist, learn
     samples = pd.read_parquet(learn.SAMPLES_FILE)
     samples = samples[learn.live_like(samples) & (samples["date"] >= BACKTEST_START)].copy()
     samples["quality"] = [learn.rule_quality(f) for f in samples[["combined_score", "rs_rating", "rr", "ext_atr"]].to_dict("records")]
@@ -326,15 +341,22 @@ def backtest() -> dict:
     out = {}
     for market, g in samples.groupby("market"):
         bad = anomalies(prices, market)
-        g = g[~g["yf_symbol"].isin(bad)]
+        g = g[~g["yf_symbol"].isin(bad)].copy()
+        g["regime"] = regime_labels(g, prices, market)
+        weak = g["regime"].isin(["Zayıf", "Ayı"]) & (market in assistant.BEAR_MIN_RS_MARKETS)
+        g = g[g["rs_rating"] >= np.where(weak, assistant.BEAR_MIN_RS, assistant.MIN_RS)]
+        ranked = g.sort_values("quality", ascending=False)
+        rank = ranked.groupby("date").cumcount()
+        limit = ranked["regime"].map(lambda r: assistant.REGIME_LIMITS[r][0])
+        top = ranked[rank < np.minimum(BACKTEST_TOP_K, limit)]
 
         wf = {y["year"]: y["chosen"] for y in rep.get("walk_forward", {}).get("live", {}).get(market, {}).get("years", [])}
-        top = g.sort_values("quality", ascending=False).groupby("date").head(BACKTEST_TOP_K)
         rule_of = lambda d: ({"name": wf[d.year], **exits.POLICIES[wf[d.year]][1]} if d.year in wf else None)  # noqa: E731
         sig = pd.DataFrame({
             "date": top["date"], "symbol": top["symbol"].fillna(top["yf_symbol"]), "yf": top["yf_symbol"],
             "entry_low": top["entry_low"], "entry_high": top["entry_high"], "stop": top["stop"], "target1": top["target1"],
-            "atr": top["atr_pct"] / 100 * top["close"], "exit_rule": [rule_of(d) for d in top["date"]], "risk_scale": 1.0,
+            "atr": top["atr_pct"] / 100 * top["close"], "exit_rule": [rule_of(d) for d in top["date"]],
+            "risk_scale": top["regime"].map(lambda r: assistant.REGIME_LIMITS[r][1]),
         })
         res = simulate(sig, prices, market, start=BACKTEST_START)
         if res:
