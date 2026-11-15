@@ -28,6 +28,7 @@ function RootStack() {
         <Stack.Screen name="chat" options={{ title: 'Asistana sor' }} />
         <Stack.Screen name="health" options={{ title: 'Sistem durumu' }} />
         <Stack.Screen name="changelog" options={{ title: 'Değişiklik günlüğü' }} />
+        <Stack.Screen name="plans" options={{ title: 'Takipteki planlar' }} />
       </Stack>
     </>
   );

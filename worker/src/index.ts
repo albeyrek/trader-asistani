@@ -27,6 +27,7 @@ import {
 } from './agenda';
 import { answer, buildContext, referenceNumbers, verifyNumbers, type ChatRequest } from './chat';
 import { healthAlert, trDay, type Health } from './health';
+import { dailyMessage, intradayEvent, intradayMessage, parsePlans, planStatus, type Bar, type PlanStatus, type TrackedPlan } from './plans';
 import { fetchQuote, yahooSymbol, type Market, type Quote } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
 
@@ -67,6 +68,7 @@ interface Device {
   notify_price_alerts?: boolean; // eski kayıtlarda yok: açık kabul edilir
   custom_alerts?: CustomAlert[]; // kullanıcının kendi fiyat alarmları (her zaman etkin)
   notify_assistant?: boolean; // asistan listesi ve aday takibi bildirimleri (eski kayıtlarda yok: açık)
+  plans?: TrackedPlan[]; // "bu planla aldım" denen hisseler (plan takibi; adet ve maliyet gönderilmez)
   platform: string;
   updated_at: string;
 }
@@ -134,7 +136,7 @@ async function listDevices(env: Env): Promise<Record<string, Device>> {
 async function registerDevice(req: Request, env: Env): Promise<Response> {
   let body: {
     token?: unknown; watchlist?: unknown; notify_all_severe?: unknown; notify_price_alerts?: unknown;
-    custom_alerts?: unknown; notify_assistant?: unknown; platform?: unknown;
+    custom_alerts?: unknown; notify_assistant?: unknown; platform?: unknown; plans?: unknown;
   };
   try {
     body = await req.json();
@@ -160,6 +162,7 @@ async function registerDevice(req: Request, env: Env): Promise<Response> {
     notify_price_alerts: body.notify_price_alerts !== false,
     custom_alerts: customAlerts,
     notify_assistant: body.notify_assistant !== false,
+    plans: parsePlans(body.plans),
     platform: typeof body.platform === 'string' ? body.platform.slice(0, 20) : 'android',
   };
   // KV ücretsiz planda günde 1000 yazma: değişmediyse yazma
@@ -168,7 +171,84 @@ async function registerDevice(req: Request, env: Env): Promise<Response> {
   if (!prev || JSON.stringify({ ...prev, updated_at: undefined }) !== JSON.stringify({ ...device, updated_at: undefined })) {
     await env.KV.put(key, JSON.stringify({ ...device, updated_at: new Date().toISOString() }));
   }
-  return json({ ok: true, watching: watchlist.length });
+  return json({ ok: true, watching: watchlist.length, plans: device.plans?.length ?? 0 });
+}
+
+// ------------------------------------------------------------------ plan takibi
+
+interface PlanState {
+  statuses: Record<string, PlanStatus>; // "cihaz|plan id" -> son günlük durum
+  meta_at?: string; // durumların hesaplandığı taramanın zamanı (meta.json updated_at)
+  last?: { at: string; plans: number; updated: number; sent: number; error?: string };
+}
+
+const planKey = (token: string, id: string) => `${token.slice(-16)}|${id}`;
+
+/** Her taramadan sonra (meta.json değişince) planların durumu günlük mumlarla yeniden hesaplanır; stop yükseldiyse,
+ *  plan kapandıysa ya da süre dolduysa bildirim. Gece saatlerinde beklenir (ABD taraması gece gelir: sabah gönderilir). */
+async function runPlans(env: Env): Promise<PlanState['last'] | null> {
+  const devices = Object.entries(await listDevices(env)).filter(([, d]) => d.plans?.length);
+  const st: PlanState = (await env.KV.get<PlanState>('plan_state', 'json')) ?? { statuses: {} };
+  const at = new Date().toISOString();
+  if (!devices.length || quietHours()) return null;
+  const meta = (await (await fetch(`${env.DATA_URL}/meta.json`, { cf: { cacheTtl: 300 } })).json()) as { updated_at: string };
+  const missing = devices.some(([token, d]) => d.plans!.some((p) => !st.statuses[planKey(token, p.id)]));
+  if (meta.updated_at === st.meta_at && !missing) return null;
+
+  const bars = new Map<string, Bar[]>();
+  for (const key of new Set(devices.flatMap(([, d]) => d.plans!.map((p) => `${p.market}/${p.symbol}`)))) {
+    try {
+      const r = await fetch(`${env.DATA_URL}/stock/${key.split('/')[0]}/${encodeURIComponent(key.split('/')[1])}.json`);
+      if (!r.ok) continue;
+      const s = (await r.json()) as { chart_daily?: { d: string; open: number; high: number; low: number; close: number }[] };
+      bars.set(key, (s.chart_daily ?? []).map((b) => ({ d: b.d, open: b.open, high: b.high, low: b.low, close: b.close })));
+    } catch {
+      // bu hisse bir sonraki taramada denenir
+    }
+  }
+  const messages: PushMessage[] = [];
+  const statuses: Record<string, PlanStatus> = {};
+  let updated = 0;
+  for (const [token, d] of devices) {
+    for (const p of d.plans!) {
+      const k = planKey(token, p.id);
+      const b = bars.get(`${p.market}/${p.symbol}`);
+      if (!b) {
+        if (st.statuses[k]) statuses[k] = st.statuses[k];
+        continue;
+      }
+      const cur = planStatus(p, b);
+      const prev = st.statuses[k];
+      statuses[k] = cur;
+      updated++;
+      // İlk hesapta (plan yeni eklendi) bildirim yok: kullanıcı durumu uygulamada görür
+      const msg = prev ? dailyMessage(p, prev, cur) : null;
+      if (msg && d.notify_assistant !== false) {
+        messages.push({ to: token, title: msg.title, body: msg.body, data: { symbol: p.symbol, market: p.market, screen: 'plans' },
+          sound: 'default', priority: 'high', channelId: 'default' });
+      }
+    }
+  }
+  const sent = messages.length ? await send(messages, env) : 0;
+  st.statuses = statuses; // silinen planların durumu da temizlenir
+  st.meta_at = meta.updated_at;
+  st.last = { at, plans: Object.keys(statuses).length, updated, sent };
+  await env.KV.put('plan_state', JSON.stringify(st));
+  return st.last;
+}
+
+/** GET /api/plans?token=... -> bu cihazın planlarının son durumu */
+async function plansEndpoint(url: URL, env: Env): Promise<Response> {
+  const token = url.searchParams.get('token') ?? '';
+  if (!TOKEN_RE.test(token)) return json({ detail: 'Geçersiz bildirim adresi' }, 422);
+  const dev = await env.KV.get<Device>(`device:${token}`, 'json');
+  const st = await env.KV.get<PlanState>('plan_state', 'json');
+  const statuses: Record<string, PlanStatus> = {};
+  for (const p of dev?.plans ?? []) {
+    const s = st?.statuses[planKey(token, p.id)];
+    if (s) statuses[p.id] = s;
+  }
+  return json({ statuses, updated_at: st?.last?.at ?? null });
 }
 
 // ------------------------------------------------------------------ bildirim
@@ -343,6 +423,7 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
   const lists = (asst ? (Object.entries(asst.markets) as [Market, AssistantMarket][]) : [])
     .filter(([, mk]) => mk.candidates.length && ageDays(mk.date) <= MAX_LIST_AGE_DAYS);
   const watched = new Set([
+    ...allDevices.flatMap(([, d]) => (d.plans ?? []).map((p) => `${p.market}:${p.symbol}`)), // önce: fiyat sınırına takılmasın
     ...devices.flatMap(([, d]) => d.watchlist.map((w) => `${w.market}:${w.symbol}`)),
     ...allDevices.flatMap(([, d]) => (d.custom_alerts ?? []).map((a) => `${a.market}:${a.symbol}`)),
     ...lists.flatMap(([m, mk]) => mk.candidates.map((c) => `${m}:${c.symbol}`)),
@@ -388,6 +469,25 @@ async function runPrices(env: Env): Promise<PriceState['last']> {
       const { title, body } = customAlertText(a, q);
       messages.push({
         to: token, title, body, data: { symbol: a.symbol, market: a.market },
+        sound: 'default', priority: 'high', channelId: 'default',
+      });
+      firedAlerts.push(k);
+    }
+  }
+
+  // Plan takibi: fiyat güncel stopun (iz süren stop dahil) altına inerse ya da hedefe ulaşırsa, plan başına günde bir kez
+  const planSt = allDevices.some(([, d]) => d.plans?.length) ? await env.KV.get<PlanState>('plan_state', 'json') : null;
+  for (const [token, dev] of allDevices) {
+    for (const p of dev.plans ?? []) {
+      const s = planSt?.statuses[planKey(token, p.id)];
+      const q = freshQuotes[`${p.market}:${p.symbol}`];
+      if (!s || !q) continue;
+      const kind = intradayEvent(p, s, q.price);
+      const k = `${today}|plan|${p.id}|${kind}`;
+      if (!kind || k in state.alerted) continue;
+      const { title, body } = intradayMessage(p, s, kind, q.price);
+      messages.push({
+        to: token, title, body, data: { symbol: p.symbol, market: p.market, screen: 'plans' },
         sound: 'default', priority: 'high', channelId: 'default',
       });
       firedAlerts.push(k);
@@ -815,6 +915,7 @@ export default {
     }
     if (url.pathname === '/api/devices' && req.method === 'POST') return registerDevice(req, env);
     if (url.pathname === '/api/quotes') return quotesEndpoint(url);
+    if (url.pathname === '/api/plans') return plansEndpoint(url, env);
     if (url.pathname === '/api/assistant') {
       const data = await fetchAssistant(env);
       if (!data) return json({ detail: 'Asistan verisi henüz yayınlanmadı' }, 404);
@@ -869,6 +970,10 @@ export default {
     }
     if (event.cron === ASSISTANT_CRON) {
       ctx.waitUntil(runHealthAlert(env).catch(() => {})); // uyarı gönderilemezse sonraki turda yeniden denenir
+      ctx.waitUntil(runPlans(env).catch(async (e: unknown) => {
+        const st = await env.KV.get<PlanState>('plan_state', 'json');
+        if (st) await env.KV.put('plan_state', JSON.stringify({ ...st, last: { ...(st.last ?? { plans: 0, updated: 0, sent: 0 }), at: new Date().toISOString(), error: String(e) } }));
+      }));
       ctx.waitUntil(
         runAssistant(env).catch(async (e: unknown) => {
           const st = await env.KV.get<AiState>('assistant', 'json');

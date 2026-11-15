@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Card, Chip } from '@/components/ui';
 import * as f from '@/lib/format';
@@ -44,8 +44,10 @@ function zoneColors(t: Theme, s: ZoneStatus): { fg: string; bg: string } {
 export function CandidateCard({ c, quote, riskScale }: { c: Candidate; quote?: Quote; riskScale: number }) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
-  const { profile, capitalFor } = usePortfolio();
-  const { customAlerts, addAlert, removeAlert, isWatched, toggleWatch } = useSettings();
+  const { profile, capitalFor, addPosition } = usePortfolio();
+  const { customAlerts, addAlert, removeAlert, isWatched, toggleWatch, plans, addPlan } = useSettings();
+  const [buying, setBuying] = useState(false);
+  const planned = plans.some((p) => p.symbol === c.symbol && p.market === c.market);
 
   const price = quote?.price ?? c.close;
   const status = zoneStatus(c, price);
@@ -173,7 +175,83 @@ export function CandidateCard({ c, quote, riskScale }: { c: Candidate; quote?: Q
           İzleme listesine eklendi; fiyat {f.price(c.stop)} altına inerse ya da {f.price(c.target1)} üstüne çıkarsa bildirim gelir.
         </Text>
       ) : null}
+      {planned ? (
+        <Pressable onPress={() => router.push('/plans')} style={[styles.bought, { borderColor: t.up, backgroundColor: t.upBg }]}
+          accessibilityRole="button">
+          <Ionicons name="shield-checkmark-outline" size={16} color={t.up} />
+          <Text style={[styles.small, { color: t.up, flex: 1, fontWeight: '600' }]}>
+            Plan takipte: stop, iz süren stop ve süre için bildirim gelir. Takipteki planlar →
+          </Text>
+        </Pressable>
+      ) : buying ? (
+        <BuyForm c={c} defaultPrice={price} defaultQty={'error' in sizing ? 0 : sizing.qty}
+          onCancel={() => setBuying(false)}
+          onSave={(fill, qty) => {
+            if (qty > 0) addPosition({ symbol: c.symbol, market: c.market, qty, price: fill });
+            addPlan(planFor(c, fill));
+            setBuying(false);
+          }} />
+      ) : (
+        <Pressable onPress={() => setBuying(true)} style={[styles.bought, { borderColor: t.accent }]} accessibilityRole="button">
+          <Ionicons name="cart-outline" size={16} color={t.accent} />
+          <Text style={[styles.small, { color: t.accent, flex: 1, fontWeight: '600' }]}>
+            Bu planla aldım: çıkışı benim için takip et
+          </Text>
+        </Pressable>
+      )}
     </Card>
+  );
+}
+
+/** Adayın çıkış kuralına göre takip edilecek plan (backend assistant_track ile aynı kural). */
+function planFor(c: Candidate, fill: number) {
+  const rule = c.exit_rule;
+  const risk = fill - c.stop;
+  const target = !rule ? c.target1 : rule.target == null ? null : typeof rule.target === 'number' ? fill + rule.target * risk : c.target1;
+  const today = new Date(Date.now() + 3 * 3600_000).toISOString().slice(0, 10); // İstanbul günü
+  return {
+    symbol: c.symbol, market: c.market, opened: today, entry: fill, stop: c.stop, target,
+    atr: c.atr && c.atr > 0 ? c.atr : risk / 1.5, trail: rule?.trail ?? null, hold: rule?.hold ?? 20, rule: rule?.name ?? 'base',
+  };
+}
+
+function BuyForm({ c, defaultPrice, defaultQty, onSave, onCancel }: {
+  c: Candidate; defaultPrice: number; defaultQty: number; onSave: (fill: number, qty: number) => void; onCancel: () => void;
+}) {
+  const t = useTheme();
+  const [px, setPx] = useState(String(defaultPrice).replace('.', ','));
+  const [qty, setQty] = useState(defaultQty ? String(defaultQty) : '');
+  // "1.234,56" (Türkçe) ya da "1234.56" yazılabilir
+  const fill = Number(px.includes(',') ? px.replace(/\./g, '').replace(',', '.') : px.trim());
+  const n = Math.floor(Number(qty.replace(/[^0-9]/g, '')) || 0);
+  const err = !(fill > 0) ? 'Alış fiyatını yaz.' : fill <= c.stop ? `Alış fiyatı stopun (${f.price(c.stop)}) üstünde olmalı.` : null;
+  return (
+    <View style={[styles.form, { borderColor: t.border }]}>
+      <Text style={[styles.small, { color: t.text, fontWeight: '700' }]}>Alışını kaydet</Text>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.cellLabel, { color: t.muted }]}>Alış fiyatı</Text>
+          <TextInput value={px} onChangeText={setPx} keyboardType="decimal-pad" style={[styles.input, { color: t.text, borderColor: t.border }]} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.cellLabel, { color: t.muted }]}>Adet (portföye eklenir)</Text>
+          <TextInput value={qty} onChangeText={setQty} keyboardType="number-pad" placeholder="isteğe bağlı" placeholderTextColor={t.muted}
+            style={[styles.input, { color: t.text, borderColor: t.border }]} />
+        </View>
+      </View>
+      <Text style={[styles.small, { color: err ? t.down : t.muted }]}>
+        {err ?? 'Buluta yalnızca plan gider (kod, alış fiyatı, stop, kural); adet ve maliyet telefonda kalır.'}
+      </Text>
+      <View style={styles.buttons}>
+        <Pressable onPress={onCancel} style={[styles.button, { borderColor: t.border }]} accessibilityRole="button">
+          <Text style={[styles.buttonText, { color: t.text }]}>Vazgeç</Text>
+        </Pressable>
+        <Pressable onPress={() => !err && onSave(fill, n)} disabled={!!err}
+          style={[styles.button, { borderColor: t.accent, backgroundColor: err ? t.neutralBg : t.accent }]} accessibilityRole="button">
+          <Text style={[styles.buttonText, { color: err ? t.muted : '#FFFFFF' }]}>Kaydet ve takip et</Text>
+        </Pressable>
+      </View>
+    </View>
   );
 }
 
@@ -202,6 +280,9 @@ const styles = StyleSheet.create({
   sectionLabel: { fontSize: 12, fontWeight: '700', marginTop: 12, marginBottom: 4 },
   text: { fontSize: 13, lineHeight: 19 },
   small: { fontSize: 12, lineHeight: 17 },
+  bought: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 10 },
+  form: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 10, padding: 10, marginTop: 10, gap: 8 },
+  input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, fontSize: 14, marginTop: 2 },
   more: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10, marginBottom: 6 },
   check: { flexDirection: 'row', gap: 6, alignItems: 'flex-start' },
   buttons: { flexDirection: 'row', gap: 10, marginTop: 12 },

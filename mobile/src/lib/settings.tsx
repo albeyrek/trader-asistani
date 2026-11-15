@@ -14,6 +14,8 @@ const SEVERE_ALL_KEY = 'notifyAllSevere';
 const PRICE_ALERTS_KEY = 'notifyPriceAlerts';
 const CUSTOM_ALERTS_KEY = 'customAlerts';
 const ASSISTANT_KEY = 'notifyAssistant';
+const PLANS_KEY = 'trackedPlans';
+const MAX_PLANS = 20;
 const API_PORT = 8000;
 
 /** Kişisel fiyat alarmı: "THYAO 245'in altına inerse" (bulut bekçisi piyasa saatlerinde 5 dakikada bir kontrol eder). */
@@ -23,6 +25,22 @@ export interface CustomAlert {
   market: Market;
   op: 'above' | 'below';
   price: number;
+}
+
+/** Takip edilen plan: "bu planla aldım" denen aday. Bulut bekçisi iz süren stopu günlük günceller; stop, hedef ve süre
+ *  için bildirim gönderir. Sunucuya yalnızca plan gider; adet ve maliyet telefonda (portföyde) kalır. */
+export interface TrackedPlan {
+  id: string;
+  symbol: string;
+  market: Market;
+  opened: string; // alış günü YYYY-MM-DD
+  entry: number;
+  stop: number;
+  target: number | null;
+  atr: number;
+  trail: number | null;
+  hold: number;
+  rule: string; // kural adı (gösterim için)
 }
 
 /** Veri kaynağı: bulut (GitHub Pages + Cloudflare, her yerden çalışır) ya da yerel bilgisayardaki API. */
@@ -68,6 +86,9 @@ interface SettingsValue {
   customAlerts: CustomAlert[];
   addAlert: (a: Omit<CustomAlert, 'id'>) => void;
   removeAlert: (id: string) => void;
+  plans: TrackedPlan[];
+  addPlan: (p: Omit<TrackedPlan, 'id'>) => void;
+  removePlan: (id: string) => void;
   sync: SyncState;
   resync: () => void;
 }
@@ -82,6 +103,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [notifyAllSevere, setNotifyAllSevereState] = useState(true);
   const [notifyPriceAlerts, setNotifyPriceAlertsState] = useState(true);
   const [customAlerts, setCustomAlerts] = useState<CustomAlert[]>([]);
+  const [plans, setPlans] = useState<TrackedPlan[]>([]);
   const [notifyAssistant, setNotifyAssistantState] = useState(true);
   const [push, setPush] = useState<PushStatus | null>(null);
   const [sync, setSync] = useState<SyncState>(null);
@@ -90,7 +112,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const [url, wl, severe, savedMode, priceAlerts, alerts, assistant] = await Promise.all([
+        const [url, wl, severe, savedMode, priceAlerts, alerts, assistant, savedPlans] = await Promise.all([
           AsyncStorage.getItem(API_URL_KEY),
           AsyncStorage.getItem(WATCHLIST_KEY),
           AsyncStorage.getItem(SEVERE_ALL_KEY),
@@ -98,7 +120,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
           AsyncStorage.getItem(PRICE_ALERTS_KEY),
           AsyncStorage.getItem(CUSTOM_ALERTS_KEY),
           AsyncStorage.getItem(ASSISTANT_KEY),
+          AsyncStorage.getItem(PLANS_KEY),
         ]);
+        if (savedPlans) setPlans(JSON.parse(savedPlans));
         if (assistant != null) setNotifyAssistantState(assistant === 'true');
         if (alerts) setCustomAlerts(JSON.parse(alerts));
         if (priceAlerts != null) setNotifyPriceAlertsState(priceAlerts === 'true');
@@ -134,6 +158,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({
         token, watchlist, notify_all_severe: notifyAllSevere, notify_price_alerts: notifyPriceAlerts,
         custom_alerts: customAlerts, notify_assistant: notifyAssistant, platform: Platform.OS,
+        plans: plans.map(({ rule: _rule, ...p }) => p), // sunucuya yalnızca plan (adet ve maliyet gitmez)
       }),
     })
       .then((r) => {
@@ -146,13 +171,30 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, notifyPriceAlerts, customAlerts, notifyAssistant, syncNonce]);
+  }, [ready, token, deviceUrl, watchlist, notifyAllSevere, notifyPriceAlerts, customAlerts, notifyAssistant, plans, syncNonce]);
 
   const addAlert = useCallback((a: Omit<CustomAlert, 'id'>) => {
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     setCustomAlerts((prev) => {
       const next = [...prev, { ...a, id }].slice(-50);
       AsyncStorage.setItem(CUSTOM_ALERTS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const addPlan = useCallback((p: Omit<TrackedPlan, 'id'>) => {
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    setPlans((prev) => {
+      const next = [...prev.filter((x) => !(x.symbol === p.symbol && x.market === p.market)), { ...p, id }].slice(-MAX_PLANS);
+      AsyncStorage.setItem(PLANS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  const removePlan = useCallback((id: string) => {
+    setPlans((prev) => {
+      const next = prev.filter((x) => x.id !== id);
+      AsyncStorage.setItem(PLANS_KEY, JSON.stringify(next)).catch(() => {});
       return next;
     });
   }, []);
@@ -225,11 +267,14 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       customAlerts,
       addAlert,
       removeAlert,
+      plans,
+      addPlan,
+      removePlan,
       sync,
       resync,
     }),
     [ready, mode, setMode, apiUrl, setApiUrl, watchlist, toggleWatch, push, notifyAllSevere, setNotifyAllSevere,
-      notifyPriceAlerts, setNotifyPriceAlerts, notifyAssistant, setNotifyAssistant, customAlerts, addAlert, removeAlert, sync, resync],
+      notifyPriceAlerts, setNotifyPriceAlerts, notifyAssistant, setNotifyAssistant, customAlerts, addAlert, removeAlert, plans, addPlan, removePlan, sync, resync],
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

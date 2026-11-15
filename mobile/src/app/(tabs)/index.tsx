@@ -15,6 +15,7 @@ import { useApi } from '@/lib/api';
 import * as f from '@/lib/format';
 import { usePortfolio } from '@/lib/portfolio';
 import { quoteKey, useQuotes } from '@/lib/quotes';
+import { useSettings } from '@/lib/settings';
 import { regimeColors, useTheme } from '@/lib/theme';
 import type {
   Agenda, AssistantData, AssistantMarket, AssistantScore, AssistantScoreMarket, ExitsReport, Health, Market, ModelMeta, PaperReport,
@@ -53,6 +54,7 @@ export default function AssistantScreen() {
       />
       <View style={{ height: 12 }} />
       <HealthBanner health={health.data} market={market} />
+      <PlansLink />
       <Pressable onPress={() => router.push({ pathname: '/chat', params: { market } })}
         style={[styles.ask, { backgroundColor: t.card, borderColor: t.accent }]} accessibilityRole="button">
         <Ionicons name="chatbubbles-outline" size={20} color={t.accent} />
@@ -97,6 +99,23 @@ export default function AssistantScreen() {
         </>
       )}
     </ScrollView>
+  );
+}
+
+/** Takipteki planlar (varsa): "bu planla aldım" denen hisselerin çıkış takibi */
+function PlansLink() {
+  const t = useTheme();
+  const { plans } = useSettings();
+  if (!plans.length) return null;
+  return (
+    <Pressable onPress={() => router.push('/plans')} style={[styles.ask, { backgroundColor: t.card, borderColor: t.up }]}
+      accessibilityRole="button">
+      <Ionicons name="shield-checkmark-outline" size={20} color={t.up} />
+      <Text style={{ color: t.text, fontSize: 14, flex: 1 }}>
+        Takipteki planlar ({plans.length}): {plans.slice(0, 4).map((p) => p.symbol).join(', ')}{plans.length > 4 ? '…' : ''}
+      </Text>
+      <Ionicons name="chevron-forward" size={16} color={t.muted} />
+    </Pressable>
   );
 }
 

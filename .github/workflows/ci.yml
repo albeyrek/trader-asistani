@@ -58,7 +58,7 @@ jobs:
       # (test/fixture.json depoda değil); yerelde çalıştırılır: npm run parity
       - name: Testler
         run: |
-          for t in assistant agenda chat health prices; do
+          for t in assistant agenda chat health plans prices; do
             echo "::group::$t"; npx tsx "test/$t.ts"; echo "::endgroup::"
           done
 
