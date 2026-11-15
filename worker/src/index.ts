@@ -28,6 +28,7 @@ import {
 import { answer, buildContext, referenceNumbers, verifyNumbers, type ChatRequest } from './chat';
 import { healthAlert, trDay, type Health } from './health';
 import { dailyMessage, intradayEvent, intradayMessage, parsePlans, planStatus, type Bar, type PlanStatus, type TrackedPlan } from './plans';
+import { briefTime, morningBrief } from './brief';
 import { fetchQuote, yahooSymbol, type Market, type Quote } from './quotes';
 import { fetchGoogleNewsTr, fetchKap, fetchYahooNews, type NewsItem } from './sources';
 
@@ -888,6 +889,37 @@ async function runAssistant(env: Env): Promise<AiState['last']> {
   return last;
 }
 
+/** Sabah özeti: hafta içi 09:30-10:00 arasındaki ilk turda, günde bir kez (bkz. brief.ts). */
+async function runBrief(env: Env): Promise<void> {
+  if (!briefTime()) return;
+  const today = trDay();
+  if ((await env.KV.get('brief_sent')) === today) return;
+  const devices = Object.entries(await listDevices(env)).filter(([, d]) => d.notify_assistant !== false);
+  if (!devices.length) return;
+  const [asst, agenda, planSt, health] = await Promise.all([
+    fetchAssistant(env),
+    env.KV.get<AgendaState>('agenda', 'json'),
+    env.KV.get<PlanState>('plan_state', 'json'),
+    fetch(`${env.DATA_URL}/health.json`).then((r) => (r.ok ? (r.json() as Promise<Health>) : null)).catch(() => null),
+  ]);
+  const healthIssue = health?.overall === 'error' ? health.checks.find((c) => c.status === 'error')?.name ?? null : null;
+  const events = calendar(today, 1);
+  const messages: PushMessage[] = [];
+  for (const [token, d] of devices) {
+    const msg = morningBrief({
+      today, bist: asst?.markets.BIST ?? null, events, healthIssue,
+      risk: agenda?.risk ? { level: agenda.risk.level, score: agenda.risk.score } : null,
+      plans: (d.plans ?? []).map((p) => ({ p, s: planSt?.statuses[planKey(token, p.id)] })),
+    });
+    if (msg) {
+      messages.push({ to: token, title: msg.title, body: msg.body, data: { screen: 'assistant', market: 'BIST' },
+        sound: 'default', channelId: 'default' });
+    }
+  }
+  if (messages.length) await send(messages, env);
+  await env.KV.put('brief_sent', today);
+}
+
 /** Sistem sağlığı "hata" ya da günlük tarama günlerdir çalışmadıysa günde bir bildirim (bkz. health.ts). */
 async function runHealthAlert(env: Env): Promise<void> {
   if (quietHours()) return;
@@ -970,6 +1002,7 @@ export default {
     }
     if (event.cron === ASSISTANT_CRON) {
       ctx.waitUntil(runHealthAlert(env).catch(() => {})); // uyarı gönderilemezse sonraki turda yeniden denenir
+      ctx.waitUntil(runBrief(env).catch(() => {})); // sabah özeti (hafta içi 09:30-10:00; gönderilemezse sonraki tur)
       ctx.waitUntil(runPlans(env).catch(async (e: unknown) => {
         const st = await env.KV.get<PlanState>('plan_state', 'json');
         if (st) await env.KV.put('plan_state', JSON.stringify({ ...st, last: { ...(st.last ?? { plans: 0, updated: 0, sent: 0 }), at: new Date().toISOString(), error: String(e) } }));
