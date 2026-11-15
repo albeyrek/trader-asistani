@@ -26,5 +26,15 @@
   {"date": "2026-11-14", "kind": "rule", "title": "Sistem sağlığı ve sapma alarmı",
    "detail": "Her taramada veri tazeliği, kaynaklar ve öğrenme kontrol ediliyor. Bir piyasada verinin %20'sinden fazlası eksikse o gün aday verilmiyor. Canlı sonuçlar 10 yıllık testin beklentisinden istatistiksel olarak belirgin kötüyse liste kısalıp pozisyon yarıya iniyor."},
   {"date": "2026-11-14", "kind": "feature", "title": "Sohbette rakam doğrulama",
-   "detail": "Sohbet cevaplarındaki her rakam uygulamanın verisinde aranıyor; bulunamayanlar işaretleniyor. Cevaplar 👍/👎 ile değerlendirilebiliyor."}
+   "detail": "Sohbet cevaplarındaki her rakam uygulamanın verisinde aranıyor; bulunamayanlar işaretleniyor. Cevaplar 👍/👎 ile değerlendirilebiliyor."},
+  {"date": "2026-11-15", "kind": "data", "title": "Gündem: yedek haber kaynakları",
+   "detail": "Google Haberler bulut sunucularına sık sık 503 verdiği için tekrar deneme eklendi; Google'a ulaşılamazsa Bloomberg HT, TRT Haber, Habertürk, Anadolu Ajansı ve Sözcü'nün kendi akışları kullanılıyor."},
+  {"date": "2026-11-15", "kind": "rule", "title": "Politik risk: kaynağa göre olağan seviye",
+   "detail": "Google'a ulaşılamadığında siyasi gerilim yoğunluğu yayıncı akışlarının kendi 7 günlük olağan seviyesine göre ölçülüyor (en az 24 saatlik veriyle). İkisi de yoksa puan yalnızca kur ve borsa hareketinden hesaplanıyor ve bu açıkça yazılıyor."},
+  {"date": "2026-11-15", "kind": "feature", "title": "Sanal portföy: boştaki para endekste",
+   "detail": "Testte BIST portföyünün ortalama %31'i nakitte bekliyordu. Aynı işlemlerle boştaki para (%10 nakit tamponu hariç) haftada bir endeks fonunda tutulsaydı yıllık getiri %49,2'den %52,5'e çıkıyor, en büyük düşüş %32,8'den %35,6'ya derinleşiyor. Karşılaştırma Sanal portföy ekranında."},
+  {"date": "2026-11-15", "kind": "feature", "title": "Plan takibi ve çıkış bildirimleri",
+   "detail": "Aday kartında \"Bu planla aldım\" denen hisselerin stopu her taramadan sonra asistanın test edilmiş çıkış kuralıyla güncelleniyor (iz süren stop yalnızca yükselir). Stop yükselince, gün içinde stop kırılınca ya da hedef/süre dolunca bildirim geliyor. Buluta yalnızca plan gidiyor; adet ve maliyet telefonda kalıyor."},
+  {"date": "2026-11-15", "kind": "feature", "title": "Sabah özeti",
+   "detail": "Hafta içi 09:30'da tek bildirim: günün listesi ve giriş bölgesindekiler, politik risk, günün takvimi (PPK, TÜİK, Fed), stopa yaklaşan planlar ve varsa sistem uyarısı."}
 ]
