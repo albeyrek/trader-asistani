@@ -42,5 +42,7 @@
   {"date": "2026-11-15", "kind": "data", "title": "Sanal portföy testi canlı kurallarla",
    "detail": "2018'den beri test artık canlı asistanın rejim kurallarını da uyguluyor (zayıf piyasada kısa liste ve küçük pozisyon). Böylece test, asistanın gerçekte yaptığını gösteriyor: BIST yıllık %45,5 (BIST 100 %28,8), en büyük düşüş %28,2 (endeks %31,8)."},
   {"date": "2026-11-15", "kind": "feature", "title": "Haftalık karne",
-   "detail": "Cuma akşamı tek bildirim: sanal portföyün bu haftaki getirisi BIST 100'e karşı, bu hafta kapanan asistan işlemleri (kâr/zarar, ortalama R) ve takipteki planların durumu. Sonuç iyi de kötü de olsa aynen yazılır."}
+   "detail": "Cuma akşamı tek bildirim: sanal portföyün bu haftaki getirisi BIST 100'e karşı, bu hafta kapanan asistan işlemleri (kâr/zarar, ortalama R) ve takipteki planların durumu. Sonuç iyi de kötü de olsa aynen yazılır."},
+  {"date": "2026-11-15", "kind": "rule", "title": "Politik risk: liste artık kısalmıyor",
+   "detail": "Politik risk \"Yüksek\" olunca BIST'te önerilen pozisyon yine yarıya iniyor ama liste 2 hisseye kısaltılmıyor. Başlık geçmişi olmadığı için piyasa şokları (BIST 100 günde -%4, dolar/TL +%3) vekil alınarak test edildi: şoktan sonraki 5 iş gününde açılan işlemler ortalamada +1,06R getirdi (normal günler +0,55R). 2018'den beri: eski kural yıllık %36,8 / en büyük düşüş %25,5; yeni kural %40,5 / %24,5."}
 ]

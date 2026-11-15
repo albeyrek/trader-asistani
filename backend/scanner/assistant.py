@@ -42,8 +42,12 @@ BEAR_MIN_RS_MARKETS = {"US"}
 MIN_EXP_R = 0.05          # öğrenen model güvenilirse: beklenen getirisi bundan düşük aday listeye girmez
 FORM_WEEKS_TEXT = "8 haftada"
 
-# Gündem (bulut bekçisi): politik risk "Yüksek" ise BIST listesi kısalır ve pozisyon yarıya iner
-RISK_LIMIT, RISK_SCALE = 2, 0.5
+# Gündem (bulut bekçisi): politik risk "Yüksek" ise BIST'te önerilen pozisyon yarıya iner; liste kısaltılmaz.
+# Başlık geçmişi olmadığı için piyasa şokları vekil alınarak test edildi (BIST 100 günde <= -%4 ya da dolar/TL >= +%3;
+# sonraki 5 iş günü "yüksek risk"): şoktan sonra açılan işlemler ortalamada +1,06R (normal günler +0,55R). 2018'den
+# beri: liste 2'ye + yarım pozisyon yıllık %36,8 / düşüş %25,5; yalnızca yarım pozisyon %40,5 / %24,5 (en iyi
+# getiri/düşüş oranı); kural yok %45,5 / %28,2.
+RISK_SCALE = 0.5
 def _backtest_summary(market: str) -> dict | None:
     """2018'den beri test portföyünün özeti (paper.py); strateji endeksin belirgin gerisindeyse uyarı."""
     from . import paper
@@ -364,10 +368,10 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         form = scorer.form(market)
         if form and form["recent_r"] <= 0 and form["effective"]:
             limit, scale = min(limit, learn.FORM_LIMIT), scale * learn.FORM_SCALE
-        # Politik risk (sadece BIST): yüksekse liste kısalır, pozisyon küçülür
+        # Politik risk (sadece BIST): yüksekse pozisyon küçülür (liste kısalmaz; bkz. RISK_SCALE)
         high_risk = market == "BIST" and risk and risk.get("level") == "Yüksek"
         if high_risk:
-            limit, scale = min(limit, RISK_LIMIT), scale * RISK_SCALE
+            scale = scale * RISK_SCALE
         drift = ((health or {}).get("drift") or {}).get(market) or {}
         drift_alarm = drift.get("status") == "alarm"
         if drift_alarm:
@@ -455,8 +459,9 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
                        if data_issue else "")
                       + (f"Sapma alarmı: {drift['text']}. Liste kısaltıldı, önerilen pozisyon yarıya indirildi. "
                          if drift_alarm else "")
-                      + (f"Politik risk yüksek ({risk['score']}/100): {'; '.join(risk.get('notes', [])[:2])}. Liste "
-                       "kısaltıldı ve önerilen pozisyon yarıya indirildi. " if high_risk else "")
+                      + (f"Politik risk yüksek ({risk['score']}/100): {'; '.join(risk.get('notes', [])[:2])}. Önerilen "
+                       "pozisyon yarıya indirildi; liste kısaltılmadı (geçmişte BIST'te sert düşüşlerin ardından "
+                       "açılan işlemler ortalamada iyi sonuç verdi ama dalgalanma yüksek). " if high_risk else "")
                       + stance(regime, len(picked), market, rejected, form)
                       + (f" {backtest['note']}" if backtest and backtest["note"] else ""),
             "data_issue": data_issue,

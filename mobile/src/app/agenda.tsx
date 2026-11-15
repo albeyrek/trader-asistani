@@ -118,7 +118,8 @@ function RiskCard({ risk }: { risk: NonNullable<Agenda['risk']> }) {
         BIST 100 {pct(comp.xu100)} · Banka endeksi {pct(comp.xbank)} (bugün)
       </Text>
       <Text style={[styles.tiny, { color: t.muted, marginTop: 4 }]}>
-        Risk “Yüksek”e çıkınca bildirim gelir ve asistan BIST listesini kısaltıp pozisyonu yarıya indirir.
+        Risk “Yüksek”e çıkınca bildirim gelir ve asistan BIST’te önerilen pozisyonu yarıya indirir (liste kısalmaz:
+        geçmişte sert düşüşlerin ardından açılan işlemler ortalamada iyi sonuç verdi).
       </Text>
     </Card>
   );
