@@ -26,7 +26,7 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{ symbol?: string; market?: string }>();
   const symbol = params.symbol;
   const market: Market | undefined = params.market === 'US' ? 'US' : params.market === 'BIST' ? 'BIST' : undefined;
-  const { push } = useSettings();
+  const { push, plans } = useSettings();
   const { positions } = usePortfolio();
   const [msgs, setMsgs] = useState<ChatMessage[]>([]);
   const [text, setText] = useState('');
@@ -39,7 +39,7 @@ export default function ChatScreen() {
 
   const suggestions = symbol
     ? [`${symbol} alayım mı?`, `${symbol} için en önemli risk ne?`, `${symbol} haberleri ne diyor?`]
-    : GENERAL;
+    : plans.length ? ['Planlarım nasıl gidiyor? Hangisinde çıkış zamanı yaklaşıyor?', ...GENERAL] : GENERAL;
 
   const send = async (q: string) => {
     const question = q.trim();
@@ -192,6 +192,7 @@ function openSource(s: ChatSource) {
   else if (s.kind === 'paper') router.push({ pathname: '/paper', params: { market: s.market ?? 'BIST' } });
   else if (s.kind === 'market') router.push('/market');
   else if (s.kind === 'portfolio') router.push('/portfolio');
+  else if (s.kind === 'plans') router.push('/plans');
   else router.push({ pathname: '/', params: { market: s.market ?? 'BIST' } });
 }
 

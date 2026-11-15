@@ -19,10 +19,24 @@ export interface ChatRequest {
   market?: 'BIST' | 'US';
   portfolio?: { symbol: string; market: 'BIST' | 'US'; qty: number; cost: number }[];
   watchlist?: { symbol: string; market: 'BIST' | 'US' }[];
+  /** Sunucu doldurur (istemciden alınmaz): cihazın takipteki planları ve bulutta hesaplanan son durumları */
+  plans?: ChatPlan[];
+}
+
+export interface ChatPlan {
+  symbol: string;
+  market: 'BIST' | 'US';
+  opened: string;
+  entry: number;
+  stop: number;
+  target: number | null;
+  trail: number | null;
+  hold: number;
+  status?: { status: string; stop: number; last: number | null; r: number | null; days: number; exit?: number; exit_date?: string };
 }
 
 export interface ChatSource {
-  kind: 'stock' | 'agenda' | 'market' | 'assistant' | 'paper' | 'model' | 'portfolio' | 'strategy';
+  kind: 'stock' | 'agenda' | 'market' | 'assistant' | 'paper' | 'model' | 'portfolio' | 'strategy' | 'plans';
   label: string;
   symbol?: string;
   market?: 'BIST' | 'US';
@@ -95,6 +109,7 @@ export const INTENTS: Record<string, RegExp> = {
   candidates: /(ne alay|ne al|aday|öneri|fırsat|hangi hisse|liste|bugün)/,
   performance: /(sanal portföy|performans|karne|başarı|kazandır|kaybettir|test|geçmiş)/,
   strategy: /(strateji|momentum|endeks fonu|abd için|iz süren|çıkış kural|stop)/,
+  plans: /(planım|planlarım|takipteki|ne zaman sat|satayım mı|satmalı|satsam|kâr al|kar al|çıkayım)/,
 };
 
 export function detectIntents(text: string): string[] {
@@ -194,6 +209,23 @@ function portfolioContext(pos: NonNullable<ChatRequest['portfolio']>, stocks: Ma
   })].join('\n');
 }
 
+const PLAN_STATUS: Record<string, string> = {
+  open: 'açık', stop: 'stop görüldü: plana göre çıkış', target: 'hedef görüldü: plana göre kâr al', time: 'süre doldu: plana göre çık',
+};
+
+export function plansContext(plans: ChatPlan[]): string {
+  return ['## Kullanıcının takipteki planları ("bu planla aldım" dediği hisseler; durum her taramadan sonra bulutta hesaplanır)',
+    ...plans.slice(0, 15).map((p) => {
+      const rule = p.trail ? `iz süren stop ${n(p.trail, 0)} ATR (yalnızca yükselir), en çok ${p.hold} işlem günü`
+        : `sabit hedef ${n(p.target)}, en çok ${p.hold} işlem günü`;
+      const s = p.status;
+      const st = !s ? 'durum henüz hesaplanmadı'
+        : `durum ${PLAN_STATUS[s.status] ?? s.status}; ${s.status === 'open' ? `güncel stop ${n(s.stop)}` : `çıkış ${n(s.exit)} (${s.exit_date})`}`
+          + `, son kapanış ${n(s.last)}, ${s.r != null ? `${s.r >= 0 ? '+' : ''}${n(s.r)}R` : ''}, ${s.days}. işlem günü`;
+      return `- ${p.symbol} (${p.market}): ${p.opened} alış ${n(p.entry)}, ilk stop ${n(p.stop)}, kural: ${rule}; ${st}`;
+    })].join('\n');
+}
+
 // ------------------------------------------------------------------ istem
 
 const SYSTEM = [
@@ -238,6 +270,12 @@ export async function buildContext(req: ChatRequest, dataUrl: string, agenda: Js
     }
     parts.push(portfolioContext(req.portfolio, stocks));
     sources.push({ kind: 'portfolio', label: 'Portföyün' });
+  }
+  // Takipteki planlar: plan/stop/çıkış sorulduysa ya da sorulan hisse takipteyse
+  const planHits = (req.plans ?? []).filter((p) => found.some((f) => f.symbol === p.symbol && f.market === p.market));
+  if (req.plans?.length && (intents.includes('plans') || intents.includes('portfolio') || planHits.length)) {
+    parts.push(plansContext(intents.includes('plans') || intents.includes('portfolio') ? req.plans : planHits));
+    sources.push({ kind: 'plans', label: 'Takipteki planların' });
   }
   if (intents.includes('candidates') || (!found.length && !intents.length)) {
     const c = asst ? candidatesContext(asst, market) : '';

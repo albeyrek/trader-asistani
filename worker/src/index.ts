@@ -754,6 +754,14 @@ async function chatEndpoint(req: Request, env: Env): Promise<Response> {
       && (p.market === 'BIST' || p.market === 'US') && Number.isFinite(Number(p.qty)) && Number.isFinite(Number(p.cost)))
       .map((p) => ({ symbol: String(p.symbol), market: p.market, qty: Number(p.qty), cost: Number(p.cost) })) : undefined,
   };
+  // Takipteki planlar: cihaz kaydından ve bulutta hesaplanan son durumdan (istemcinin gönderdiğine güvenilmez)
+  if (token) {
+    const dev = await env.KV.get<Device>(`device:${token}`, 'json');
+    if (dev?.plans?.length) {
+      const pst = await env.KV.get<PlanState>('plan_state', 'json');
+      request.plans = dev.plans.map((p) => ({ ...p, status: pst?.statuses[planKey(token, p.id)] }));
+    }
+  }
   const agendaState = await env.KV.get<AgendaState>('agenda', 'json');
   const agenda = agendaState ? (agendaResponse(agendaState) as Record<string, unknown>) : null;
   const { context, sources } = await buildContext(request, env.DATA_URL, agenda);

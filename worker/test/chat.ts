@@ -1,5 +1,5 @@
 // Sohbet: hisse ve konu tespiti testi — npx tsx test/chat.ts
-import { detectIntents, detectSymbols, referenceNumbers, verifyNumbers } from '../src/chat';
+import { detectIntents, detectSymbols, plansContext, referenceNumbers, verifyNumbers } from '../src/chat';
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -45,6 +45,14 @@ const fake = unv('Hedef fiyat 355,40 TL ve stop 288 TL.').join(',');
 check('uydurma fiyat yakalanır', fake === '355,40,288', fake);
 const fakePct = unv('Son ayda %17,3 yükseldi.').join(',');
 check('uydurma yüzde yakalanır', fakePct === '%17,3', fakePct);
+
+// Takipteki planlar
+check('plan niyeti', detectIntents('THYAO\'yu ne zaman satmalıyım?').includes('plans') && detectIntents('Planlarım nasıl gidiyor?').includes('plans'));
+const pc = plansContext([{ symbol: 'THYAO', market: 'BIST', opened: '2026-11-03', entry: 300, stop: 285, target: null, trail: 3, hold: 60,
+  status: { status: 'open', stop: 304.5, last: 318.25, r: 1.22, days: 9 } }]);
+check('plan bağlamı', pc.includes('THYAO (BIST): 2026-11-03 alış 300,00') && pc.includes('güncel stop 304,50') && pc.includes('+1,22R'), pc);
+const pref = referenceNumbers(pc);
+check('plan rakamları doğrulanır', verifyNumbers('THYAO için güncel iz süren stop 304,50; son kapanış 318,25 ve +1,22R kârdasın.', pref).unverified.length === 0);
 
 console.log(fail ? `\n${fail} test başarısız` : '\nTüm testler geçti');
 process.exit(fail ? 1 : 0);

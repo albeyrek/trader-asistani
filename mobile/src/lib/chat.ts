@@ -11,7 +11,7 @@ const KEEP = 40;
 const TIMEOUT_MS = 60_000;
 
 export interface ChatSource {
-  kind: 'stock' | 'agenda' | 'market' | 'assistant' | 'paper' | 'model' | 'portfolio' | 'strategy';
+  kind: 'stock' | 'agenda' | 'market' | 'assistant' | 'paper' | 'model' | 'portfolio' | 'strategy' | 'plans';
   label: string;
   symbol?: string;
   market?: Market;
