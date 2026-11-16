@@ -61,10 +61,19 @@ def sector_frame(prices: pd.DataFrame, sector_of: dict[str, str]) -> pd.DataFram
     return out[SECTOR_FEATURES]
 
 
-def sector_map() -> dict[str, str]:
+def sector_map(scan: pd.DataFrame | None = None) -> dict[str, str]:
+    """Yahoo kodu -> sektör. BIST: taramadaki sektör (KAP/BIST sınıflaması); ABD: Nasdaq sektörü (temel veriler)."""
+    from . import fundamentals
     from .scan import RESULTS_FILE
-    scan = pd.read_parquet(RESULTS_FILE, columns=["yf_symbol", "sector"])
-    return {r.yf_symbol: r.sector for r in scan.itertuples() if isinstance(r.sector, str) and r.sector}
+    if scan is None:
+        scan = pd.read_parquet(RESULTS_FILE, columns=["market", "symbol", "yf_symbol", "sector"])
+    fund = fundamentals.load()
+    out = {}
+    for r in scan.itertuples():
+        sec = r.sector if isinstance(r.sector, str) and r.sector else (fund.get(f"{r.market}:{r.symbol}") or {}).get("sector")
+        if sec:
+            out[r.yf_symbol] = sec
+    return out
 
 
 # ------------------------------------------------------------------ veri
@@ -286,8 +295,7 @@ def load_champion(market: str) -> dict | None:
 
 def live_sector_features(prices: pd.DataFrame, scan: pd.DataFrame, market: str) -> dict[str, dict]:
     """Bugün için sektör özellikleri: yahoo kodu -> {özellik: değer} (şampiyon modeli sektör özelliği kullanıyorsa)."""
-    g = scan[scan["market"] == market]
-    smap = {r.yf_symbol: r.sector for r in g.itertuples() if isinstance(r.sector, str) and r.sector}
+    smap = sector_map(scan[scan["market"] == market])
     px = prices[prices["yf_symbol"].isin(list(smap))]
     px = px[px["date"] >= px["date"].max() - pd.Timedelta(days=200)]  # 63 iş günü getiri + 50 gün ortalama yeter
     f = sector_frame(px, smap)
