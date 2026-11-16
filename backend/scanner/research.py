@@ -90,7 +90,8 @@ def dataset(market: str, samples: pd.DataFrame, trades: pd.DataFrame, sectors: p
     embargo = int((hold + assistant_track.ENTRY_DAYS) * 7 / 5) + 7  # en uzun işlem (takvim günü) + bir hafta
     rcol = f"r_{rule}"
     s = samples[(samples["market"] == market) & (samples["status"] != "not_filled")]
-    d = s.merge(trades[["yf_symbol", "date", "live", rcol, "r_base"]], on=["yf_symbol", "date"], how="inner")
+    cols = list(dict.fromkeys(["yf_symbol", "date", "live", rcol, "r_base"]))  # kural "base" ise aynı sütun bir kez
+    d = s.merge(trades[cols], on=["yf_symbol", "date"], how="inner")
     d = d[d["date"] <= d["date"].max() - pd.Timedelta(days=embargo)].copy()
     d[learn.FEATURES] = d[learn.FEATURES].replace([np.inf, -np.inf], np.nan)
     if sectors is not None:

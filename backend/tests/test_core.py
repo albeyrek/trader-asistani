@@ -270,3 +270,13 @@ def test_sector_frame():
     assert last.loc["A.IS", "sec_rank_1m"] == 1.0 and last.loc["D.IS", "sec_rank_1m"] == 0.5  # yükselen sektör önde
     assert last.loc["A.IS", "sec_rel_1m"] > 0 > last.loc["B.IS", "sec_rel_1m"]  # sektör medyanına göre (C medyan)
     assert last.loc["A.IS", "sec_breadth50"] > last.loc["D.IS", "sec_breadth50"]
+
+
+def test_static_json_files_valid():
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    log = json.loads((root / "changelog.json").read_text(encoding="utf-8"))
+    assert all({"date", "kind", "title", "detail"} <= set(e) for e in log)
+    road = json.loads((root / "roadmap.json").read_text(encoding="utf-8"))
+    assert all(i["status"] in {"done", "active", "next", "planned", "dropped"} for p in road["phases"] for i in p["items"])

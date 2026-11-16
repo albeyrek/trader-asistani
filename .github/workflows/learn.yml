@@ -58,6 +58,7 @@ jobs:
       # şampiyon olur ve o piyasanın sıralamasını devralır (yoksa kurallar)
       - name: Model yarisi
         run: python -m scanner.research
+        continue-on-error: true  # yarış hata verirse öğrenmenin geri kalanı (test portföyü, dışa aktarma) yine çalışsın
 
       # 2018'den beri test portföyü (asistanın haftalık ilk 5'i, yıl yıl seçilen çıkış kuralı, maliyet ve likidite dahil)
       - name: Sanal portfoy testi

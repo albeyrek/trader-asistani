@@ -6,7 +6,7 @@
    {"status": "done", "title": "Model yarışı", "detail": "Her hafta piyasa başına aday modeller geleceği görmeden test edilir. Şampiyon şartı: haftalık fark t ≥ 2,5, en az +0,05R, yılların %60'ında pozitif ve tek bir yıla dayanmıyor. Geçen yoksa kurallar sıralar."},
    {"status": "done", "title": "Doğru hedef", "detail": "Modeller, asistanın o piyasada gerçekte kullandığı çıkış kuralının sonucunu öğreniyor (BIST'te iz süren stop)."},
    {"status": "done", "title": "Piyasa başına model", "detail": "BIST ve ABD ayrı öğreniliyor (önceden verinin %92'si ABD'den geldiği için BIST'in davranışı kayboluyordu)."},
-   {"status": "done", "title": "Sektör hareketi", "detail": "Sektörün 1 ve 3 aylık getirisi, sektörler arası sırası, sektör genişliği ve hissenin sektörüne göre farkı. BIST'te ilk testte en büyük iyileşme bundan geldi."},
+   {"status": "done", "title": "Sektör hareketi", "detail": "Sektörün 1 ve 3 aylık getirisi, sektörler arası sırası, sektör genişliği ve hissenin sektörüne göre farkı. İlk yerel testte en büyük iyileşme bundan geldi (+0,20R); BIST verisi artınca üstünlüğü azaldı (+0,05R). Yarışta her hafta denenmeye devam ediyor."},
    {"status": "done", "title": "BIST verisi iki katına yakın", "detail": "2023 öncesi BIST örnekleri iki haftada birdi; artık her hafta (BIST'te asıl darboğaz veri miktarı)."}
   ]},
   {"id": 2, "title": "Yeni bilgi kaynakları", "when": "Aralık 2026", "items": [
