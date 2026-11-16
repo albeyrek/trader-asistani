@@ -12,7 +12,8 @@ import type { Market, ResearchCandidate, ResearchReport, Roadmap, RoadmapItem } 
 
 const RULE_TEXT: Record<string, string> = { trail3: 'iz süren stop (3 ATR)', base: 'sabit hedef, 20 gün' };
 
-function statusColors(t: Theme, s: RoadmapItem['status']): { fg: string; bg: string; label: string; icon: 'checkmark-circle' | 'play-circle' | 'arrow-forward-circle' | 'ellipse-outline' } {
+function statusColors(t: Theme, s: RoadmapItem['status']): { fg: string; bg: string; label: string; icon: 'checkmark-circle' | 'play-circle' | 'arrow-forward-circle' | 'ellipse-outline' | 'close-circle-outline' } {
+  if (s === 'dropped') return { fg: t.muted, bg: t.neutralBg, label: 'Denendi, işe yaramadı', icon: 'close-circle-outline' };
   if (s === 'done') return { fg: t.up, bg: t.upBg, label: 'Tamam', icon: 'checkmark-circle' };
   if (s === 'active') return { fg: t.accent, bg: t.neutralBg, label: 'Sürüyor', icon: 'play-circle' };
   if (s === 'next') return { fg: t.warn, bg: t.warnBg, label: 'Sırada', icon: 'arrow-forward-circle' };

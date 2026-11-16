@@ -378,7 +378,7 @@ export interface ResearchReport {
   history: ({ at: string } & Partial<Record<Market, { champion: string | null; best_edge: number | null; best_t: number | null; n: number }>>)[];
 }
 
-export interface RoadmapItem { status: 'done' | 'active' | 'next' | 'planned'; title: string; detail: string }
+export interface RoadmapItem { status: 'done' | 'active' | 'next' | 'planned' | 'dropped'; title: string; detail: string }
 export interface Roadmap {
   goal: string;
   measure: string;

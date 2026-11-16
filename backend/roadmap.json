@@ -13,7 +13,7 @@
    {"status": "next", "title": "KAP olayları", "detail": "KAP arşivi tamamlanınca olay çalışmasında kanıtlanan bildirimler (bedelsiz, geri alım, yeni iş, SPK tedbiri) yarışa yeni özellik olarak girer."},
    {"status": "next", "title": "ABD sektör verisi", "detail": "ABD hisselerinin sektör bilgisi yok; eklenince sektör özellikleri ABD'de de denenecek."},
    {"status": "planned", "title": "Kur ve faiz ortamı", "detail": "Dolar/TL ve faiz değişimi, piyasa rejimi puanı model özelliği olarak."},
-   {"status": "planned", "title": "Hissenin karakteri", "detail": "Aynı hissenin önceki kurulumlarının sonucu (bazı hisseler planlara sürekli iyi/kötü uyuyor mu?)."}
+   {"status": "dropped", "title": "Hissenin karakteri", "detail": "Aynı hissenin sonucu kesinleşmiş önceki kurulumlarının ortalaması. Denendi (16 Kasım 2026): BIST'te sektörlü modelin farkını +0,20R'den +0,09R'ye düşürdü; eklenmedi."}
   ]},
   {"id": 3, "title": "Daha iyi karar", "when": "Ocak 2027", "items": [
    {"status": "planned", "title": "Güvene göre pozisyon", "detail": "Şampiyon model varsa, beklenen getirisi yüksek adaylarda pozisyon büyür, düşüklerde küçülür (yalnızca testte işe yararsa)."},
