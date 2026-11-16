@@ -16,6 +16,7 @@
    {"status": "dropped", "title": "Hissenin karakteri", "detail": "Aynı hissenin sonucu kesinleşmiş önceki kurulumlarının ortalaması. Denendi (16 Kasım 2026): BIST'te sektörlü modelin farkını +0,20R'den +0,09R'ye düşürdü; eklenmedi."}
   ]},
   {"id": 3, "title": "Daha iyi karar", "when": "Ocak 2027", "items": [
+   {"status": "next", "title": "Düşüş kontrolü", "detail": "Haftalık örnekli testte BIST portföyü Şubat-Ekim 2021'de zirveden %45 düştü (BIST 100 %11). Stratejinin kendi son haftalarındaki sonucu kötüleşince pozisyonu küçültmek bu tür dönemleri yumuşatır mı? Test edilip işe yararsa uygulanacak."},
    {"status": "planned", "title": "Güvene göre pozisyon", "detail": "Şampiyon model varsa, beklenen getirisi yüksek adaylarda pozisyon büyür, düşüklerde küçülür (yalnızca testte işe yararsa)."},
    {"status": "planned", "title": "Olasılık kalibrasyonu", "detail": "\"Kazanma olasılığı %X\" dendiğinde gerçekleşenin de %X olması; sapma varsa düzeltme."},
    {"status": "planned", "title": "Giriş zamanlaması", "detail": "Bölgeye gelince hemen almak mı, gün sonu teyidiyle almak mı daha iyi? Test edilip kanıtlanırsa uygulanır."}
