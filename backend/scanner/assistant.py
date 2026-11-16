@@ -402,7 +402,8 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             if scorer.active:
                 w, pw = prepare(to_weekly(daily).sort_values("date").reset_index(drop=True), WEEKLY)
                 model = scorer.predict(d, t, score_at(d, piv, t, DAILY, market),
-                                       score_at(w, pw, len(w) - 1, WEEKLY, market), plan, market, r["rs_rating"])
+                                       score_at(w, pw, len(w) - 1, WEEKLY, market), plan, market, r["rs_rating"],
+                                       r["yf_symbol"])
             key = f"{market}:{r['symbol']}"
             ev = side.events.get(key)
             sector = side.sector_info(market, r.get("sector") or None)
@@ -436,7 +437,13 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             rows.append(c)
         min_rs = BEAR_MIN_RS if regime["label"] in ("Zayıf", "Ayı") and market in BEAR_MIN_RS_MARKETS else MIN_RS
         rejected = 0
-        if scorer.reliable:
+        champion = scorer.champion_name(market)
+        by_champion = bool(champion and rows and all(c["model"] and c["model"].get("rank") is not None for c in rows))
+        if by_champion:
+            # Model yarışının şampiyonu (piyasaya özel, çıkış kuralının R'siyle sıkı testi geçti) sıralar
+            rows.sort(key=lambda c: -c["model"]["rank"])
+            eligible = [c for c in rows if c["rs_rating"] >= min_rs]
+        elif scorer.reliable:
             # Öğrenen model testten geçtiyse sıralamayı o yapar ve beklenen getirisi düşük adayları eler
             rows.sort(key=lambda c: -c["model"]["exp_r"])
             eligible = [c for c in rows if c["rs_rating"] >= min_rs]
@@ -470,7 +477,8 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             "backtest": backtest,
             "form": {k: form[k] for k in ("recent_r", "recent_n", "recent_win", "long_r", "long_n", "effective")}
             if form else None,
-            "ranking": "model" if scorer.reliable else "rules",
+            "ranking": "champion" if by_champion else "model" if scorer.reliable else "rules",
+            "champion": champion if by_champion else None,
             "screened": int(len(g)), "passed_filter": int(len(pre)), "with_plan": len(rows),
             "candidates": picked,
             "radar": [{k: c[k] for k in RADAR_FIELDS} for c in radar],

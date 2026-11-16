@@ -1,0 +1,29 @@
+{
+ "goal": "Asistanın seçtiği adayların isabeti ve işlem başına getirisi (R), kuralların seçiminden kanıtlanmış şekilde yüksek olsun. Her fikir aynı sıkı testten geçer; geçemeyen devreye girmez.",
+ "measure": "Ölçü: her hafta seçilen ilk 5 adayın, asistanın gerçek çıkış kuralıyla ortalama R'si ve isabeti (kârla kapanan oranı); 2018'den beri geleceği görmeyen kayan testte, kuralların ilk 5'i ve bütün adaylarla karşılaştırmalı.",
+ "phases": [
+  {"id": 1, "title": "Doğru ölçüm ve model yarışı", "when": "Kasım 2026", "items": [
+   {"status": "done", "title": "Model yarışı", "detail": "Her hafta piyasa başına aday modeller geleceği görmeden test edilir. Şampiyon şartı: haftalık fark t ≥ 2,5, en az +0,05R, yılların %60'ında pozitif ve tek bir yıla dayanmıyor. Geçen yoksa kurallar sıralar."},
+   {"status": "done", "title": "Doğru hedef", "detail": "Modeller, asistanın o piyasada gerçekte kullandığı çıkış kuralının sonucunu öğreniyor (BIST'te iz süren stop)."},
+   {"status": "done", "title": "Piyasa başına model", "detail": "BIST ve ABD ayrı öğreniliyor (önceden verinin %92'si ABD'den geldiği için BIST'in davranışı kayboluyordu)."},
+   {"status": "done", "title": "Sektör hareketi", "detail": "Sektörün 1 ve 3 aylık getirisi, sektörler arası sırası, sektör genişliği ve hissenin sektörüne göre farkı. BIST'te ilk testte en büyük iyileşme bundan geldi."},
+   {"status": "done", "title": "BIST verisi iki katına yakın", "detail": "2023 öncesi BIST örnekleri iki haftada birdi; artık her hafta (BIST'te asıl darboğaz veri miktarı)."}
+  ]},
+  {"id": 2, "title": "Yeni bilgi kaynakları", "when": "Aralık 2026", "items": [
+   {"status": "next", "title": "KAP olayları", "detail": "KAP arşivi tamamlanınca olay çalışmasında kanıtlanan bildirimler (bedelsiz, geri alım, yeni iş, SPK tedbiri) yarışa yeni özellik olarak girer."},
+   {"status": "next", "title": "ABD sektör verisi", "detail": "ABD hisselerinin sektör bilgisi yok; eklenince sektör özellikleri ABD'de de denenecek."},
+   {"status": "planned", "title": "Kur ve faiz ortamı", "detail": "Dolar/TL ve faiz değişimi, piyasa rejimi puanı model özelliği olarak."},
+   {"status": "planned", "title": "Hissenin karakteri", "detail": "Aynı hissenin önceki kurulumlarının sonucu (bazı hisseler planlara sürekli iyi/kötü uyuyor mu?)."}
+  ]},
+  {"id": 3, "title": "Daha iyi karar", "when": "Ocak 2027", "items": [
+   {"status": "planned", "title": "Güvene göre pozisyon", "detail": "Şampiyon model varsa, beklenen getirisi yüksek adaylarda pozisyon büyür, düşüklerde küçülür (yalnızca testte işe yararsa)."},
+   {"status": "planned", "title": "Olasılık kalibrasyonu", "detail": "\"Kazanma olasılığı %X\" dendiğinde gerçekleşenin de %X olması; sapma varsa düzeltme."},
+   {"status": "planned", "title": "Giriş zamanlaması", "detail": "Bölgeye gelince hemen almak mı, gün sonu teyidiyle almak mı daha iyi? Test edilip kanıtlanırsa uygulanır."}
+  ]},
+  {"id": 4, "title": "Canlı geri besleme", "when": "Sürekli", "items": [
+   {"status": "done", "title": "Sapma alarmı", "detail": "Canlı sonuçlar testin beklentisinden belirgin kötüleşirse asistan temkin moduna geçer."},
+   {"status": "active", "title": "Haftalık yarış geçmişi", "detail": "Her haftanın en iyi modeli ve isabeti kaydedilir; ilerleme bu ekranda izlenir."},
+   {"status": "planned", "title": "Gündem ve politik risk modele", "detail": "Gündem arşivi 6 ayı doldurunca (Mayıs 2027) haber temaları ve politik risk özellik olarak denenir."}
+  ]}
+ ]
+}

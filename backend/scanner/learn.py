@@ -63,6 +63,10 @@ TIMEMACHINE_FILE = MODEL_DIR / "timemachine.json"
 #  - DENSE_YEARS'tan eski dönemde iki haftada bir örneklenir (son yıllar haftalık),
 #  - önceki çalıştırmanın örnekleri saklanır; sadece son REFRESH_WEEKS (sonucu değişebilecek) ve yeni haftalar hesaplanır.
 DENSE_YEARS = 3
+# BIST'te her yıl haftalık (hisse sayısı az, model için veri asıl darboğaz). Önceki örnekler iki haftada birse eksik
+# haftalar bir kez tamamlanır (DENSE_FLAG yoksa BIST baştan hesaplanır; ~470 hisse, bulutta birkaç dakika).
+DENSE_MARKETS = {"BIST"}
+DENSE_FLAG = "dense_bist.flag"
 REFRESH_WEEKS = 10
 SAMPLE_COLUMNS_VERSION = 2   # örnek biçimi değişince artırılır (eski örnekler atılır, baştan hesaplanır)
 # İlk 10 yıllık hesap bulutta (4 çekirdek) saatler sürer; bir kez yerelde yapılıp GitHub sürüm dosyası olarak yüklendi.
@@ -260,8 +264,17 @@ def collect(limit: int | None, workers: int | None, full: bool = False) -> pd.Da
         keep = stocks["yf_symbol"].drop_duplicates().sample(limit, random_state=1)
         stocks = stocks[stocks["yf_symbol"].isin(keep)]
     weekly = dict(tuple(to_weekly(stocks).groupby("yf_symbol")))
-    tasks = [(sym, meta.loc[sym, "market"], g, weekly[sym], since, dense_from)
-             for sym, g in stocks.groupby("yf_symbol") if sym in weekly]
+    backfill = since is not None and not (MODEL_DIR / DENSE_FLAG).exists()
+    if backfill:
+        print(f"{', '.join(sorted(DENSE_MARKETS))}: eski dönem haftalık örneklerle tamamlanıyor (bir kerelik)", flush=True)
+
+    def task(sym: str, g: pd.DataFrame):
+        market = meta.loc[sym, "market"]
+        dense = market in DENSE_MARKETS
+        return (sym, market, g, weekly[sym], None if (backfill and dense) else since,
+                pd.Timestamp.min if dense else dense_from)
+
+    tasks = [task(sym, g) for sym, g in stocks.groupby("yf_symbol") if sym in weekly]
     rows: list[dict] = []
     with ProcessPoolExecutor(max_workers=workers) as ex:
         for i, res in enumerate(ex.map(_replay_symbol, tasks, chunksize=20), 1):
@@ -275,7 +288,10 @@ def collect(limit: int | None, workers: int | None, full: bool = False) -> pd.Da
         df["symbol"] = df["yf_symbol"].map(meta["symbol"])
         df = df[df["rs_rating"].fillna(0) >= DOMAIN_MIN_RS]
     if since is not None:
-        df = pd.concat([old[old["date"] <= since], df], ignore_index=True)
+        keep = old[old["date"] <= since]
+        if backfill:  # tamamlanan piyasaların eski örnekleri yenileriyle değişir
+            keep = keep[~keep["market"].isin(DENSE_MARKETS)]
+        df = pd.concat([keep, df], ignore_index=True)
     df["version"] = SAMPLE_COLUMNS_VERSION
     return df.sort_values(["date", "yf_symbol"]).reset_index(drop=True)
 
@@ -704,6 +720,8 @@ def main() -> None:
         df = collect(args.limit, args.workers, args.full)
         MODEL_DIR.mkdir(parents=True, exist_ok=True)
         df.to_parquet(SAMPLES_FILE, index=False)
+        if not args.limit:  # BIST eski dönem tamamlaması yapıldı (bir daha yapılmaz)
+            (MODEL_DIR / DENSE_FLAG).write_text(pd.Timestamp.now(tz="UTC").isoformat(), encoding="utf-8")
     print(f"{len(df):,} örnek ({df['status'].value_counts().to_dict()}) — {time.time() - t0:.0f} sn", flush=True)
     train(df)
     print(f"Toplam {time.time() - t0:.0f} sn")
@@ -733,6 +751,22 @@ class Scorer:
         if self.active:
             symbols = {m: g["yf_symbol"].tolist() for m, g in scan.groupby("market")}
             self.ctx = {m: c.iloc[-1].to_dict() for m, (c, _) in market_context(prices, symbols).items()}
+        # Model yarışının şampiyonları (research.py): varsa o piyasanın adaylarını sıralar
+        from . import research  # döngüsel içe aktarma olmasın
+        self.champions = {m: c for m in ("BIST", "US") if (c := research.load_champion(m))}
+        self.sector: dict[str, dict] = {}
+        for m, c in self.champions.items():
+            if set(c["features"]) & set(research.SECTOR_FEATURES):
+                try:
+                    self.sector[m] = research.live_sector_features(prices, scan, m)
+                except Exception as exc:  # sektör özellikleri hesaplanamazsa şampiyon o gün kullanılmaz
+                    print(f"  ! {m} sektör özellikleri: {exc!r}")
+                    self.champions.pop(m, None)
+                    break
+
+    def champion_name(self, market: str) -> str | None:
+        c = self.champions.get(market)
+        return c["name"] if c else None
 
     def form(self, market: str) -> dict | None:
         """Strateji formu (son 8 haftanın sonuçlanmış planları); veri yoksa None.
@@ -746,11 +780,19 @@ class Scorer:
                      and t.get("bad_weeks", 0) >= FORM_MIN_BAD_WEEKS)
         return {**f, "effective": bool(effective), "test": t}
 
-    def predict(self, d: pd.DataFrame, t: int, da, wa, plan: dict, market: str, rs_rating: float) -> dict | None:
+    def predict(self, d: pd.DataFrame, t: int, da, wa, plan: dict, market: str, rs_rating: float,
+                yf: str | None = None) -> dict | None:
         if not self.active or da is None or wa is None:
             return None
         f = {**row_features(d, t, da, wa, plan, market), "rs_rating": float(rs_rating), **self.ctx.get(market, {})}
         x = pd.DataFrame([f])[FEATURES]
+        rank = None
+        ch = self.champions.get(market)
+        if ch:
+            fx = {**f, **self.sector.get(market, {}).get(yf or "", {})}
+            xc = pd.DataFrame([fx]).reindex(columns=ch["features"]).astype(float)
+            out = ch["model"].predict_proba(xc)[:, 1] if ch["target"] == "y_win" else ch["model"].predict(xc)
+            rank = float(out[0])
         p = apply_offset(float(self.model["clf"].predict_proba(x)[0, 1]), self.model.get("clf_offset", {}).get(market, 0.0))
         exp_r = float(np.clip(self.model["reg"].predict(x)[0], *R_CLIP)) if self.reliable else None
         similar = None
@@ -759,4 +801,5 @@ class Scorer:
             similar = next((s for s in self.meta.get("setup_stats", [])
                             if s["market"] == market and s["setup"] == plan["setup"] and s["breadth"] == bucket), None)
         return {"p": round(p, 3), "exp_r": round(exp_r, 2) if exp_r is not None else None,
-                "similar": similar, "reliable": self.reliable}
+                "similar": similar, "reliable": self.reliable,
+                **({"rank": round(rank, 4), "champion": ch["name"]} if rank is not None else {})}

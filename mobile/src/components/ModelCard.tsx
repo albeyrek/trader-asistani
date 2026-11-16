@@ -119,6 +119,11 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
         </>
       ) : null}
 
+      <Pressable onPress={() => router.push({ pathname: '/research', params: { market } })}
+        style={[styles.tmButton, { borderColor: t.accent }]} accessibilityRole="button">
+        <Ionicons name="trophy-outline" size={16} color={t.accent} />
+        <Text style={{ color: t.accent, fontWeight: '700', fontSize: 13 }}>Model yarışı ve isabet yol haritası</Text>
+      </Pressable>
       <Pressable onPress={() => router.push('/timemachine')} style={[styles.tmButton, { borderColor: t.accent }]} accessibilityRole="button">
         <Ionicons name="time-outline" size={16} color={t.accent} />
         <Text style={{ color: t.accent, fontWeight: '700', fontSize: 13 }}>Zaman makinesi: yıl yıl geçmiş test</Text>

@@ -19,6 +19,7 @@ from .config import DATA_DIR
 
 REPORT_JSON = DATA_DIR / "exits_report.json"
 REPORT_TXT = DATA_DIR / "exits_report.txt"
+TRADES_FILE = DATA_DIR / "exits_trades.parquet"  # her örneğin her kuraldaki R'si (model yarışının hedefi: research.py)
 MIN_GAIN_R = 0.05  # yeni kural ancak hem tüm geçmişte hem yıl yıl testte temel plandan en az bu kadar iyiyse seçilir
 ENTRY_DAYS = assistant_track.ENTRY_DAYS
 MAX_BARS = 60
@@ -175,6 +176,7 @@ def main() -> None:
     t0 = time.time()
     df = collect()
     print(f"{len(df):,} işlem simüle edildi ({time.time() - t0:.0f} sn)")
+    df.to_parquet(TRADES_FILE, index=False)
     rep = report(df)
     REPORT_JSON.write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
     txt = _txt(rep)

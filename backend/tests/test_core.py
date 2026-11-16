@@ -232,3 +232,41 @@ def test_paper_idle_cash_in_index():
     assert cash["equity"] == pytest.approx(100_000)  # boştaki nakit getirisiz
     assert inv["equity"] > 100_000 * 1.2  # haftalık olarak endekse yatırılan %90 yükselişten pay alır
     assert inv["exposure_pct"] == pytest.approx(0)  # hisse payı yok (endeks hisse sayılmaz)
+
+
+# ------------------------------------------------------------------ model yarışı
+
+def _weeks(diffs_by_year: dict, base: float = 0.5, n_per_year: int = 20):
+    rows = []
+    for y, diff in diffs_by_year.items():
+        for i in range(n_per_year):
+            noise = 0.3 if i % 2 else -0.3
+            rows.append({"date": pd.Timestamp(f"{y}-01-01") + pd.Timedelta(weeks=i), "top_r": base + diff + noise,
+                         "rule_r": base, "all_r": base - 0.05, "top_hit": 0.5, "rule_hit": 0.4, "all_hit": 0.4})
+    return pd.DataFrame(rows)
+
+
+def test_research_gate_passes_consistent_edge():
+    from scanner import research
+    j = research.judge(_weeks({2020: 0.15, 2021: 0.2, 2022: 0.1, 2023: 0.15}), 0.05)
+    assert j["passed"] and j["edge"] == pytest.approx(0.15, abs=1e-3) and j["years_positive"] == 1.0
+
+
+def test_research_gate_rejects_single_year_luck():
+    from scanner import research
+    j = research.judge(_weeks({2020: -0.05, 2021: 0.9, 2022: -0.05, 2023: -0.04}), 0.05)
+    assert not j["passed"] and any("en iyi yıl" in w for w in j["why_not"])
+
+
+def test_sector_frame():
+    from scanner import research
+    d = pd.bdate_range("2025-01-01", periods=80)
+    rows = []
+    for s, slope in (("A.IS", 1.01), ("B.IS", 1.0), ("C.IS", 1.005), ("D.IS", 0.99), ("E.IS", 0.995), ("F.IS", 0.992)):
+        rows += [{"date": x, "yf_symbol": s, "close": 100 * slope ** i} for i, x in enumerate(d)]
+    f = research.sector_frame(pd.DataFrame(rows), {"A.IS": "tek", "B.IS": "tek", "C.IS": "tek",
+                                                   "D.IS": "iki", "E.IS": "iki", "F.IS": "iki"})
+    last = f.xs(d[-1], level="date")
+    assert last.loc["A.IS", "sec_rank_1m"] == 1.0 and last.loc["D.IS", "sec_rank_1m"] == 0.5  # yükselen sektör önde
+    assert last.loc["A.IS", "sec_rel_1m"] > 0 > last.loc["B.IS", "sec_rel_1m"]  # sektör medyanına göre (C medyan)
+    assert last.loc["A.IS", "sec_breadth50"] > last.loc["D.IS", "sec_breadth50"]

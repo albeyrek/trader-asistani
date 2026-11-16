@@ -141,6 +141,21 @@ def change_log():
     return changelog.entries()
 
 
+@app.get("/api/research")
+def model_race():
+    """Model yarışı (bulutta research.json; haftalık öğrenmede: python -m scanner.research)."""
+    from scanner import research
+    if not research.RESEARCH_FILE.exists():
+        raise HTTPException(404, "Model yarışı henüz çalışmadı. 'python -m scanner.research' çalıştırın.")
+    return json.loads(research.RESEARCH_FILE.read_text(encoding="utf-8"))
+
+
+@app.get("/api/roadmap")
+def roadmap():
+    """İsabet yol haritası (backend/roadmap.json)."""
+    return json.loads((Path(__file__).resolve().parent.parent / "roadmap.json").read_text(encoding="utf-8"))
+
+
 @app.get("/api/timemachine/{year}")
 def time_machine(year: str):
     """Zaman makinesi (bulutta timemachine/{yıl}.json; 'index' yıl listesini verir)."""

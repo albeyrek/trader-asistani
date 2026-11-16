@@ -31,7 +31,7 @@ from pathlib import Path
 import pandas as pd
 
 from . import market as market_view  # "market" döngü değişkeni olarak da kullanılıyor
-from . import assistant, assistant_track, changelog, exits, health, learn, paper, scorecard, us_strategy, views
+from . import assistant, assistant_track, changelog, exits, health, learn, paper, research, scorecard, us_strategy, views
 from .config import DATA_DIR, ROOT
 from .news import HIGH_SEVERITY, ITEMS_FILE, SOFT_CATEGORIES, _name_token
 from .prices import load_prices, to_weekly
@@ -178,6 +178,12 @@ def export(out: Path) -> None:
         rep = exits_rep
         _write(data / "exits.json", {"generated_at": rep["generated_at"], "selected": rep.get("selected", {}),
                                      "policies": rep["policies"]["live"], "walk_forward": rep["walk_forward"]["live"]})
+    # Model yarışı (haftalık öğrenmede: scanner/research.py) ve isabet yol haritası (backend/roadmap.json)
+    if research.RESEARCH_FILE.exists():
+        _write(data / "research.json", json.loads(research.RESEARCH_FILE.read_text(encoding="utf-8")))
+    roadmap_file = ROOT / "roadmap.json"
+    if roadmap_file.exists():
+        _write(data / "roadmap.json", json.loads(roadmap_file.read_text(encoding="utf-8")))
     # Zaman makinesi: geçmiş haftalarda asistanın seçimleri ve sonuçları (yıl başına bir dosya)
     if learn.TIMEMACHINE_FILE.exists():
         tm = json.loads(learn.TIMEMACHINE_FILE.read_text(encoding="utf-8"))

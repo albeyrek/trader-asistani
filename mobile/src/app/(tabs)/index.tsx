@@ -142,6 +142,7 @@ function StanceCard({ mk, market }: { mk: AssistantMarket; market: Market }) {
         trendi, göreli güç ≥70, olumsuz haber ve uyarı yok, yakında bilanço yok), {mk.with_plan} tanesi için uygun ödül/risk
         planı çıktı.{mk.risk_scale < 1 ? ` Piyasa ortamı nedeniyle önerilen pozisyon büyüklüğü ×${f.num(mk.risk_scale, 2)}.` : ''}
         {mk.ranking === 'model' ? ' Sıralamayı öğrenen model yaptı; beklenen getirisi düşük olanlar elendi.' : ''}
+        {mk.ranking === 'champion' ? ` Sıralamayı model yarışının şampiyonu yaptı (${mk.champion}).` : ''}
         {market === 'BIST' ? ' Liste her iş günü ~18:45’te, ABD listesi sabah yenilenir.' : ' Liste her sabah (ABD kapanışından sonra) yenilenir.'}
       </Text>
     </Card>

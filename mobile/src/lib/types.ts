@@ -308,7 +308,8 @@ export interface AssistantMarket {
   with_plan: number;
   candidates: Candidate[];
   radar: RadarItem[];
-  ranking?: 'model' | 'rules'; // sıralamayı öğrenen model mi, kurallar mı yaptı
+  ranking?: 'model' | 'champion' | 'rules'; // sıralamayı öğrenen model mi, model yarışının şampiyonu mu, kurallar mı yaptı
+  champion?: string | null; // şampiyon modelin adı
   political_risk?: Pick<PoliticalRisk, 'score' | 'level' | 'notes'> | null; // sadece BIST
   /** 2018'den beri test portföyünün özeti; strateji endeksin belirgin gerisindeyse uyarı */
   backtest?: { cagr_pct: number; index_cagr_pct: number; max_dd_pct: number; lagging: boolean; note: string | null } | null;
@@ -345,6 +346,43 @@ export interface Health {
   checks: HealthCheck[];
   drift: Partial<Record<Market, DriftInfo>>;
   blocked_markets: Market[];
+}
+
+/** Model yarışı (research.json): piyasa başına aday modellerin geleceği görmeyen test sonuçları */
+export interface ResearchCandidate {
+  name: string;
+  weeks: number;
+  top_r: number;
+  rule_r: number;
+  all_r: number;
+  edge: number;
+  edge_t: number;
+  hit: number;
+  rule_hit: number;
+  all_hit: number;
+  ic: number | null;
+  years: Record<string, number>;
+  years_positive: number;
+  passed: boolean;
+  why_not: string[];
+}
+
+export interface ResearchReport {
+  generated_at: string;
+  gate: { t: number; edge: number; years: number };
+  top_k: number;
+  markets: Partial<Record<Market, {
+    rule: string; n: number; n_live: number; period: { from: string; to: string };
+    candidates: Record<string, ResearchCandidate>; champion: string | null; decision: string;
+  }>>;
+  history: ({ at: string } & Partial<Record<Market, { champion: string | null; best_edge: number | null; best_t: number | null; n: number }>>)[];
+}
+
+export interface RoadmapItem { status: 'done' | 'active' | 'next' | 'planned'; title: string; detail: string }
+export interface Roadmap {
+  goal: string;
+  measure: string;
+  phases: { id: number; title: string; when: string; items: RoadmapItem[] }[];
 }
 
 export interface ChangelogEntry {
