@@ -145,6 +145,14 @@ function StanceCard({ mk, market }: { mk: AssistantMarket; market: Market }) {
         {mk.ranking === 'champion' ? ` Sıralamayı model yarışının şampiyonu yaptı (${mk.champion}).` : ''}
         {market === 'BIST' ? ' Liste her iş günü ~18:45’te, ABD listesi sabah yenilenir.' : ' Liste her sabah (ABD kapanışından sonra) yenilenir.'}
       </Text>
+      {mk.portfolio ? (
+        <Text style={[styles.small, { color: t.text, marginTop: 6 }]}>
+          Test edilen portföy düzeni: işlem başına sermayenin %{f.num(mk.portfolio.risk_pct, mk.portfolio.risk_pct % 1 ? 1 : 0)}’i
+          riskte, en fazla {mk.portfolio.max_positions} pozisyon
+          {mk.portfolio.sector_cap ? `, aynı sektörde en fazla ${mk.portfolio.sector_cap}` : ''}
+          {mk.portfolio.sector_cap ? ' (çok sayıda küçük pozisyonla çeşitlendirme 2018’den beri testte düşüşü azalttı).' : '.'}
+        </Text>
+      ) : null}
     </Card>
   );
 }

@@ -54,6 +54,32 @@ IDLE_MIN_MOVE = 0.02    # bundan küçük fazlalık yatırılmaz
 # %25 düşünce yeni pozisyonlar yarıya. BIST 2018'den beri: yıllık %49,0 -> %46,3, en büyük düşüş %46,2 -> %38,5
 # (getiri/düşüş 1,06 -> 1,20). Bedeli: toparlanmada frende kalınca 2023 +%1,7 yerine -%13,2. ABD'de şartı geçen yok.
 BRAKE = {"BIST": {"kind": "dd", "level": -0.25, "scale": 0.5}}
+# Portföy düzeni (scanner/diversify.py testi, 16 Kasım 2026; seçenekler ve şart önceden sabit): BIST'te haftada 10 aday,
+# en çok 20 pozisyon, işlem başına %0,6 risk, aynı sektörde en çok 3 pozisyon. 2018'den beri: yıllık %46,3 -> %52,3,
+# en büyük düşüş %38,5 -> %31,5 (getiri/düşüş 1,20 -> 1,66). Uyarı: kazanç 2018-2023'ten; 2024-2026'da her yıl geride.
+# ABD'de şartı geçen yok (varsayılanlar).
+PORTFOLIO = {"BIST": {"top_k": 10, "max_positions": 20, "risk_pct": 0.006, "sector_cap": 3}}
+
+
+def portfolio_settings(market: str) -> dict:
+    return {"top_k": BACKTEST_TOP_K, "max_positions": MAX_POSITIONS, "risk_pct": RISK_PCT, "sector_cap": None,
+            **PORTFOLIO.get(market, {})}
+
+
+def _sim_kwargs(market: str, sector_of: dict[str, str] | None) -> dict:
+    """simulate için piyasanın düzeni: düşüş freni, risk, pozisyon sayısı, sektör sınırı."""
+    ps = portfolio_settings(market)
+    return {"brake": BRAKE.get(market), "risk_pct": ps["risk_pct"], "max_positions": ps["max_positions"],
+            "sector_cap": ps["sector_cap"], "sector_of": sector_of if ps["sector_cap"] else None}
+
+
+def _sector_map() -> dict[str, str] | None:
+    try:
+        from . import research
+        return research.sector_map()
+    except Exception as exc:  # sektör bilgisi yoksa sektör sınırı uygulanmaz
+        print(f"  ! sektör eşlemesi: {exc!r}")
+        return None
 
 
 def _bars(prices: pd.DataFrame, yf: str) -> pd.DataFrame | None:
@@ -321,6 +347,7 @@ def drawdown_now(res: dict | None) -> float | None:
 
 def live(history: list[dict], prices: pd.DataFrame, yf_of: dict[str, str]) -> dict:
     out = {}
+    smap = _sector_map()
     for market in ("BIST", "US"):
         rows = []
         for h in (x for x in history if x["market"] == market):
@@ -333,10 +360,10 @@ def live(history: list[dict], prices: pd.DataFrame, yf_of: dict[str, str]) -> di
         if len(sig):
             sig = sig.dropna(subset=["yf"])
             start = str(sig["date"].min().date())
-            res = simulate(sig, prices, market, start=start, brake=BRAKE.get(market))
+            kw = _sim_kwargs(market, smap)
+            res = simulate(sig, prices, market, start=start, **kw)
             if res:
-                res["idle_index"] = idle_summary(simulate(sig, prices, market, start=start, idle="index",
-                                                          brake=BRAKE.get(market)))
+                res["idle_index"] = idle_summary(simulate(sig, prices, market, start=start, idle="index", **kw))
                 out[market] = res
     return out
 
@@ -364,7 +391,8 @@ def regime_labels(g: pd.DataFrame, prices: pd.DataFrame, market: str) -> pd.Seri
     return pd.Series([next(lab for th, lab, _ in REGIMES if s >= th) for s in score], index=g.index)
 
 
-def backtest_signals(top_k: int = BACKTEST_TOP_K) -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict, list[str]]]]:
+def backtest_signals(top_k: int | None = None) -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict, list[str]]]]:
+    """top_k: haftalık aday sayısı (yoksa piyasanın düzeni: portfolio_settings)."""
     """Test portföyünün girdileri: (fiyatlar, piyasa -> (sinyaller, yıl yıl çıkış kuralı, çıkarılan hisseler))."""
     from . import assistant, exits, history as hist, learn
     samples = pd.read_parquet(learn.SAMPLES_FILE)
@@ -382,7 +410,7 @@ def backtest_signals(top_k: int = BACKTEST_TOP_K) -> tuple[pd.DataFrame, dict[st
         ranked = g.sort_values("quality", ascending=False)
         rank = ranked.groupby("date").cumcount()
         limit = ranked["regime"].map(lambda r: assistant.REGIME_LIMITS[r][0])
-        top = ranked[rank < np.minimum(top_k, limit)]
+        top = ranked[rank < np.minimum(top_k or portfolio_settings(market)["top_k"], limit)]
         wf = {y["year"]: y["chosen"] for y in rep.get("walk_forward", {}).get("live", {}).get(market, {}).get("years", [])}
         rule_of = lambda d: ({"name": wf[d.year], **exits.POLICIES[wf[d.year]][1]} if d.year in wf else None)  # noqa: E731
         sig = pd.DataFrame({
@@ -401,14 +429,15 @@ def backtest() -> dict:
     Canlı asistanın rejim kuralları da uygulanır: zayıf piyasada liste kısalır ve pozisyon küçülür (REGIME_LIMITS),
     ABD'de zayıf/ayı piyasada yalnızca göreli gücü yüksek hisseler (BEAR_MIN_RS)."""
     prices, inputs = backtest_signals()
+    smap = _sector_map()
     out = {}
     for market, (sig, wf, excluded) in inputs.items():
-        res = simulate(sig, prices, market, start=BACKTEST_START, brake=BRAKE.get(market))
+        kw = _sim_kwargs(market, smap)
+        res = simulate(sig, prices, market, start=BACKTEST_START, **kw)
         if res:
-            res["idle_index"] = idle_summary(simulate(sig, prices, market, start=BACKTEST_START, idle="index",
-                                                      brake=BRAKE.get(market)))
-            if BRAKE.get(market):  # karşılaştırma: fren olmasaydı
-                nb = simulate(sig, prices, market, start=BACKTEST_START)
+            res["idle_index"] = idle_summary(simulate(sig, prices, market, start=BACKTEST_START, idle="index", **kw))
+            if BRAKE.get(market):  # karşılaştırma: fren olmasaydı (aynı düzen)
+                nb = simulate(sig, prices, market, start=BACKTEST_START, **{**kw, "brake": None})
                 res["without_brake"] = {k: nb[k] for k in ("cagr_pct", "max_dd_pct", "return_pct") if k in nb}
             res["rules_by_year"] = {str(y): r for y, r in sorted(wf.items())}
             res["excluded"] = excluded

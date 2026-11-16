@@ -17,6 +17,8 @@
   ]},
   {"id": 3, "title": "Daha iyi karar", "when": "Ocak 2027", "items": [
    {"status": "done", "title": "Düşüş kontrolü", "detail": "6 seçenek önceden sabitlenmiş şartla test edildi; BIST'te \"zirveden %25 düşünce yeni pozisyonlar yarıya\" freni seçildi: en büyük düşüş %46,2 -> %38,5, yıllık getiri %49,0 -> %46,3. Bedeli: toparlanmada frende kalınca 2023 +%1,7 yerine -%13,2. Form freni (son 10/20 işlem) getiriden fazla kaybettirdi. ABD'de şartı geçen yok."},
+   {"status": "done", "title": "Çeşitlendirme ve sektör sınırı", "detail": "BIST'te en çok 20 pozisyon, işlem başına %0,6 risk, aynı sektörde en çok 3 pozisyon: 2018'den beri yıllık %46,3 -> %52,3, en büyük düşüş %38,5 -> %31,5. Uyarı: kazanç 2018-2023'ten; 2024-2026'da her yıl şimdiki düzenin gerisinde. Canlı sonuçlarla izleniyor."},
+   {"status": "dropped", "title": "Çıkış kuralları 2.0", "detail": "9 yeni kural (iz süren stop 2-3,5 ATR, 40/90 gün, yarısını 1,5R/2R'de satma, başa-baş) portföy düzeyinde denendi; hiçbiri şartı geçmedi. Mevcut 3 ATR iz süren stop en iyiler arasında; yarısını erken satmak yılda ~15 puan kaybettiriyor."},
    {"status": "planned", "title": "Güvene göre pozisyon", "detail": "Şampiyon model varsa, beklenen getirisi yüksek adaylarda pozisyon büyür, düşüklerde küçülür (yalnızca testte işe yararsa)."},
    {"status": "planned", "title": "Olasılık kalibrasyonu", "detail": "\"Kazanma olasılığı %X\" dendiğinde gerçekleşenin de %X olması; sapma varsa düzeltme."},
    {"status": "planned", "title": "Giriş zamanlaması", "detail": "Bölgeye gelince hemen almak mı, gün sonu teyidiyle almak mı daha iyi? Test edilip kanıtlanırsa uygulanır."}

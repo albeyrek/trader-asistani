@@ -60,12 +60,14 @@ def decide(rows: dict[str, dict]) -> dict:
 def main() -> None:
     t0 = time.time()
     prices, inputs = paper.backtest_signals()
+    smap = paper._sector_map()
     out = {"generated_at": pd.Timestamp.now(tz="UTC").isoformat(), "variants": VARIANTS,
            "rule": {"min_ratio_gain": MIN_RATIO_GAIN, "max_cagr_loss": MAX_CAGR_LOSS}, "markets": {}}
     for market, (sig, _, _) in inputs.items():
         rows = {}
         for key, brake in VARIANTS.items():
-            res = paper.simulate(sig, prices, market, start=paper.BACKTEST_START, brake=brake)
+            res = paper.simulate(sig, prices, market, start=paper.BACKTEST_START,
+                                 **{**paper._sim_kwargs(market, smap), "brake": brake})
             rows[key] = summary(res)
             r = rows[key]
             print(f"{market} {key:7} yıllık %{r['cagr']:6.2f}  düşüş %{r['max_dd']:7.2f}  oran {r['ratio']}  "

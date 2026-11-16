@@ -481,6 +481,10 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
                       + stance(regime, len(picked), market, rejected, form)
                       + (f" {backtest['note']}" if backtest and backtest["note"] else ""),
             "data_issue": data_issue,
+            # Test edilen portföy düzeni (paper.PORTFOLIO): işlem başına risk, en çok pozisyon, aynı sektörde en çok
+            "portfolio": {k: v for k, v in {"risk_pct": round(paper_mod.portfolio_settings(market)["risk_pct"] * 100, 2),
+                                             "max_positions": paper_mod.portfolio_settings(market)["max_positions"],
+                                             "sector_cap": paper_mod.portfolio_settings(market)["sector_cap"]}.items()},
             "brake": {"drawdown_pct": round(pdd * 100, 1), "scale": brake["scale"]} if braking else None,
             "drift": drift or None,
             "political_risk": {k: risk.get(k) for k in ("score", "level", "notes")} if market == "BIST" and risk else None,

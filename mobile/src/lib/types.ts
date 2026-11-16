@@ -316,6 +316,8 @@ export interface AssistantMarket {
   /** Strateji formu: asistanın planları son 8 haftada (geçmiş veride) ne kazandırdı; negatifse temkin modu */
   form?: { recent_r: number; recent_n: number; recent_win: number | null; long_r: number; long_n: number;
     effective?: boolean } | null;
+  /** Test edilen portföy düzeni: işlem başına risk (%), en çok pozisyon, aynı sektörde en çok (yoksa sınır yok) */
+  portfolio?: { risk_pct: number; max_positions: number; sector_cap: number | null } | null;
   /** Veri sorunu (ör. hisselerin çoğunda son günün fiyatı yok): o gün aday verilmez */
   data_issue?: string | null;
   /** Canlı sonuçların 10 yıllık testin beklentisine göre durumu; "alarm"da liste kısalır, pozisyon yarıya iner */
@@ -665,7 +667,7 @@ export interface PaperResult {
     pnl_pct: number; r: number; days: number }[];
   closed: { symbol: string; entry_date: string; fill: number; exit_date: string; exit: number; how: 'stop' | 'target' | 'time';
     pnl: number; pnl_pct: number; r: number; days: number }[];
-  settings: { risk_pct: number; max_pos_pct: number; max_positions: number; cost_pct: number; entry_days: number };
+  settings: { risk_pct: number; max_pos_pct: number; max_positions: number; cost_pct: number; entry_days: number; sector_cap?: number | null };
   rules_by_year?: Record<string, string>;
   excluded?: string[];
   /** Aynı işlemler, boştaki para (nakitte %10 tampon kalacak şekilde) haftalık olarak endeks fonunda tutulsaydı */

@@ -52,7 +52,7 @@ def decide(rows: dict[str, dict]) -> dict:
             continue
         yrs = [y for y in r["years"] if y in base["years"]]
         r["years_better"] = round(sum(r["years"][y] > base["years"][y] for y in yrs) / max(len(yrs), 1), 2)
-        r["improves"] = better(r, base)
+        r["improves"] = bool(better(r, base))  # numpy bool JSON yazılamaz
     passed = [k for k, r in rows.items() if k != "simdiki" and r["improves"] and r["years_better"] >= MIN_YEARS
               and any(rows[n]["cagr"] >= base["cagr"] or (rows[n]["ratio"] or 0) >= (base["ratio"] or 0)
                       for n in NEIGHBORS[k])]
@@ -62,12 +62,13 @@ def decide(rows: dict[str, dict]) -> dict:
 def main() -> None:
     t0 = time.time()
     prices, inputs = paper.backtest_signals()
+    smap = paper._sector_map()
     out = {"generated_at": pd.Timestamp.now(tz="UTC").isoformat(), "rules": RULES, "markets": {}}
     for market, (sig, wf, _) in inputs.items():
         rows = {}
         for key in ["simdiki", *RULES]:
             s = sig if key == "simdiki" else sig.assign(exit_rule=[{"name": key, **RULES[key]}] * len(sig))
-            res = paper.simulate(s, prices, market, start=paper.BACKTEST_START, brake=paper.BRAKE.get(market))
+            res = paper.simulate(s, prices, market, start=paper.BACKTEST_START, **paper._sim_kwargs(market, smap))
             rows[key] = summary(res)
             r = rows[key]
             print(f"{market} {key:10} yıllık %{r['cagr']:6.2f}  düşüş %{r['max_dd']:7.2f}  oran {r['ratio']}  "

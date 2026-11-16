@@ -78,8 +78,8 @@ export default function PaperScreen() {
           <Card title="Kurallar">
             <Text style={[styles.small, { color: t.text }]}>
               Başlangıç {f.money(r.capital, market)}. Asistanın listesindeki her aday, sonraki {r.settings.entry_days} gün içinde
-              giriş bölgesine gelirse alınır. Lot: sermayenin %{f.num(r.settings.risk_pct, 0)}’i stopta kaybedilecek şekilde
-              (zayıf piyasada küçültülür); tek pozisyon sermayenin %{f.num(r.settings.max_pos_pct, 0)}’ini ve hissenin günlük işlem
+              giriş bölgesine gelirse alınır. Lot: sermayenin %{f.num(r.settings.risk_pct, r.settings.risk_pct % 1 ? 1 : 0)}’i stopta kaybedilecek şekilde
+              (zayıf piyasada küçültülür){r.settings.sector_cap ? `; aynı sektörde en fazla ${r.settings.sector_cap} pozisyon` : ''}; tek pozisyon sermayenin %{f.num(r.settings.max_pos_pct, 0)}’ini ve hissenin günlük işlem
               hacminin %{f.num(data.settings.participation_pct, 0)}’sini geçmez; en fazla {r.settings.max_positions} pozisyon. Çıkış
               asistanın çıkış kuralıyla. Her alış ve satışta %{f.num(r.settings.cost_pct, 2)} maliyet (komisyon + kayma); vergi yok.
               BIST’te tavanda açılan hisse alınmaz, tabanda kilitli hisse o gün satılamaz.
