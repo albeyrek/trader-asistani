@@ -50,6 +50,10 @@ PARTICIPATION = 0.02
 IDX_COST = 0.001        # endeks fonu alım-satım maliyeti (tek yön; komisyon + kayma)
 IDLE_BUFFER = 0.10      # nakitte tutulan pay
 IDLE_MIN_MOVE = 0.02    # bundan küçük fazlalık yatırılmaz
+# Düşüş freni (scanner/drawdown.py testi, 16 Kasım 2026; seçenekler ve şart önceden sabitlendi): portföy zirvesinden
+# %25 düşünce yeni pozisyonlar yarıya. BIST 2018'den beri: yıllık %49,0 -> %46,3, en büyük düşüş %46,2 -> %38,5
+# (getiri/düşüş 1,06 -> 1,20). Bedeli: toparlanmada frende kalınca 2023 +%1,7 yerine -%13,2. ABD'de şartı geçen yok.
+BRAKE = {"BIST": {"kind": "dd", "level": -0.25, "scale": 0.5}}
 
 
 def _bars(prices: pd.DataFrame, yf: str) -> pd.DataFrame | None:
@@ -299,6 +303,14 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
 
 # ------------------------------------------------------------------ canlı: asistanın gerçek listeleri
 
+def drawdown_now(res: dict | None) -> float | None:
+    """Portföyün şu anki düşüşü (zirveye göre, 0 ile -1 arası); eğri yoksa None."""
+    if not res or not res.get("curve"):
+        return None
+    eq = [e for _, e, _ in res["curve"]]
+    return eq[-1] / max(eq) - 1 if max(eq) > 0 else None
+
+
 def live(history: list[dict], prices: pd.DataFrame, yf_of: dict[str, str]) -> dict:
     out = {}
     for market in ("BIST", "US"):
@@ -312,10 +324,11 @@ def live(history: list[dict], prices: pd.DataFrame, yf_of: dict[str, str]) -> di
         sig = pd.DataFrame(rows)
         if len(sig):
             sig = sig.dropna(subset=["yf"])
-            res = simulate(sig, prices, market, start=str(sig["date"].min().date()))
+            start = str(sig["date"].min().date())
+            res = simulate(sig, prices, market, start=start, brake=BRAKE.get(market))
             if res:
-                res["idle_index"] = idle_summary(simulate(sig, prices, market, start=str(sig["date"].min().date()),
-                                                          idle="index"))
+                res["idle_index"] = idle_summary(simulate(sig, prices, market, start=start, idle="index",
+                                                          brake=BRAKE.get(market)))
                 out[market] = res
     return out
 
@@ -382,9 +395,13 @@ def backtest() -> dict:
     prices, inputs = backtest_signals()
     out = {}
     for market, (sig, wf, excluded) in inputs.items():
-        res = simulate(sig, prices, market, start=BACKTEST_START)
+        res = simulate(sig, prices, market, start=BACKTEST_START, brake=BRAKE.get(market))
         if res:
-            res["idle_index"] = idle_summary(simulate(sig, prices, market, start=BACKTEST_START, idle="index"))
+            res["idle_index"] = idle_summary(simulate(sig, prices, market, start=BACKTEST_START, idle="index",
+                                                      brake=BRAKE.get(market)))
+            if BRAKE.get(market):  # karşılaştırma: fren olmasaydı
+                nb = simulate(sig, prices, market, start=BACKTEST_START)
+                res["without_brake"] = {k: nb[k] for k in ("cagr_pct", "max_dd_pct", "return_pct") if k in nb}
             res["rules_by_year"] = {str(y): r for y, r in sorted(wf.items())}
             res["excluded"] = excluded
             out[market] = res

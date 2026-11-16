@@ -122,6 +122,13 @@ function Summary({ r, indexName, mode }: { r: PaperResult; indexName: string; mo
         {r.win_rate != null ? `; kârla kapanan %${f.num(r.win_rate, 0)}, işlem başına ortalama ${rText(r.avg_r)}` : ''}
         {`; sermayenin ortalama %${f.num(r.exposure_pct, 0)}’i yatırımda.`}
       </Text>
+      {r.brake ? (
+        <Text style={[styles.small, { color: t.muted, marginTop: 6 }]}>
+          Düşüş freni: portföy zirvesinden %{f.num(-(r.brake.level ?? 0) * 100, 0)} düşünce yeni pozisyonlar yarıya iner
+          {r.brake_buys ? ` (${r.brake_buys} alımda devreye girdi)` : ''}.
+          {r.without_brake ? ` Fren olmasaydı: yıllık %${f.num(r.without_brake.cagr_pct, 1)}, en büyük düşüş ${f.pct(r.without_brake.max_dd_pct, 1)}.` : ''}
+        </Text>
+      ) : null}
       {r.idle_index ? <IdleIndex r={r} indexName={indexName} /> : null}
     </Card>
   );

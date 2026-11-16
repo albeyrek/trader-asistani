@@ -669,6 +669,10 @@ export interface PaperResult {
   rules_by_year?: Record<string, string>;
   excluded?: string[];
   /** Aynı işlemler, boştaki para (nakitte %10 tampon kalacak şekilde) haftalık olarak endeks fonunda tutulsaydı */
+  /** Düşüş freni (zirveden %25 düşünce yeni pozisyonlar yarıya) olmasaydı */
+  without_brake?: { cagr_pct: number | null; max_dd_pct: number; return_pct: number } | null;
+  brake?: { kind: string; level?: number; scale: number } | null;
+  brake_buys?: number;
   idle_index?: { equity: number; return_pct: number; cagr_pct: number | null; max_dd_pct: number; exposure_pct: number;
     curve: [string, number, number][] } | null;
 }

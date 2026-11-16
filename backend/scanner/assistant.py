@@ -347,6 +347,7 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
     health: sistem sağlığı (health.build): veri sorunu olan piyasada aday verilmez; canlı sonuçlar testten belirgin
     kötüyse (sapma alarmı) liste kısalır, pozisyon yarıya iner."""
     from . import exits, learn  # bu modülü kullanıyorlar (döngüsel içe aktarma olmasın)
+    from . import paper as paper_mod
     scorer = learn.Scorer(prices, scan)
     risk = (agenda or {}).get("risk")
     impacts = {s["sector"]: s for s in (agenda or {}).get("sectors", [])}
@@ -372,6 +373,12 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         high_risk = market == "BIST" and risk and risk.get("level") == "Yüksek"
         if high_risk:
             scale = scale * RISK_SCALE
+        # Düşüş freni: asistanın sanal portföyü zirvesinden belirli oranda aşağıdaysa pozisyon küçülür (paper.BRAKE)
+        brake = paper_mod.BRAKE.get(market)
+        pdd = ((health or {}).get("paper_dd") or {}).get(market)
+        braking = bool(brake and pdd is not None and pdd <= brake["level"])
+        if braking:
+            scale = scale * brake["scale"]
         drift = ((health or {}).get("drift") or {}).get(market) or {}
         drift_alarm = drift.get("status") == "alarm"
         if drift_alarm:
@@ -464,6 +471,8 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             "risk_scale": scale,
             "stance": (f"Veri sorunu: {data_issue}. Yanlış veriyle plan üretmemek için bugün aday verilmiyor. "
                        if data_issue else "")
+                      + (f"Düşüş freni: asistanın sanal portföyü zirvesinden %{-pdd * 100:.0f} aşağıda; önerilen pozisyon "
+                         "yarıya indirildi (2018'den beri testte en büyük düşüşü %46'dan %38'e indirdi). " if braking else "")
                       + (f"Sapma alarmı: {drift['text']}. Liste kısaltıldı, önerilen pozisyon yarıya indirildi. "
                          if drift_alarm else "")
                       + (f"Politik risk yüksek ({risk['score']}/100): {'; '.join(risk.get('notes', [])[:2])}. Önerilen "
@@ -472,6 +481,7 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
                       + stance(regime, len(picked), market, rejected, form)
                       + (f" {backtest['note']}" if backtest and backtest["note"] else ""),
             "data_issue": data_issue,
+            "brake": {"drawdown_pct": round(pdd * 100, 1), "scale": brake["scale"]} if braking else None,
             "drift": drift or None,
             "political_risk": {k: risk.get(k) for k in ("score", "level", "notes")} if market == "BIST" and risk else None,
             "backtest": backtest,

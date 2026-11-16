@@ -130,6 +130,13 @@ def export(out: Path) -> None:
     exits_rep = json.loads(exits.REPORT_JSON.read_text(encoding="utf-8")) if exits.REPORT_JSON.exists() else None
     prev_score = assistant_track.evaluate(assistant_track.load_history(), all_prices)
     hl = health.safe_build(scan, all_prices, news, prev_score, model_meta, exits_rep, health.kap_archive_days())
+    # Düşüş freni için asistanın sanal portföyünün şu anki düşüşü (dünkü listelerle; bugünkü henüz alınmadı)
+    yf_map = {f"{r.market}:{r.symbol}": r.yf_symbol for r in scan.itertuples()}
+    try:
+        hl["paper_dd"] = {m: paper.drawdown_now(r) for m, r in paper.live(assistant_track.load_history(), all_prices,
+                                                                          yf_map).items()}
+    except Exception as exc:  # fren hesaplanamazsa asistan frensiz devam eder
+        print(f"  ! sanal portföy düşüşü: {exc!r}")
     _write(data / "health.json", hl)
     health.archive_universe(raw_scan, str(scan["date"].max()))
     print(f"  sağlık: {hl['overall']} ({sum(c['status'] != 'ok' for c in hl['checks'])} uyarı/hata)")
