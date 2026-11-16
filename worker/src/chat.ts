@@ -196,7 +196,7 @@ function strategyContext(us: Json | null, exits: Json | null, model: Json | null
     const e = us.report[us.experiment];
     if (i && e) lines.push(`ABD: risk/getiri en iyisi S&P 500'ü tutmak (yıllık %${n(i.cagr, 1)}, Sharpe ${n(i.sharpe)}); deneysel düzeltilmiş momentum yıllık %${n(e.cagr, 1)} ama düşüş %${n(e.max_dd, 0)}, canlı test ediliyor. Asistanın kısa vadeli planı ABD'de endeksin gerisinde kaldı.`);
   }
-  if (model) lines.push(`Öğrenen model: ${model.reliable ? 'sıralamayı yapıyor' : 'henüz kurallardan iyi değil, sıralamayı kurallar yapıyor'}; olasılık isabeti AUC ${n(model.metrics?.clf?.auc)}`);
+  if (model) lines.push(`Öğrenen model: kazanma olasılığını gösterir (isabet AUC ${n(model.metrics?.clf?.auc)}); adayları yalnızca model yarışının sıkı şartlarını geçen piyasa şampiyonu sıralar, yoksa kurallar sıralar`);
   return lines.length > 1 ? lines.join('\n') : '';
 }
 

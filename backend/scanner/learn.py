@@ -656,11 +656,11 @@ def train(df: pd.DataFrame) -> dict:
     old_meta = json.loads(META_FILE.read_text(encoding="utf-8")) if META_FILE.exists() else {}
     if reliable or previous is None or not previous.get("reliable"):
         champion = candidate
-        decision = "getiri modeli testi geçti, sıralamayı devraldı" if reliable else \
-            "getiri modeli henüz kurallardan iyi değil; sıralama kural tabanlı"
+        decision = ("ortak model kendi testini geçti; sıralama yetkisi yine de yalnızca model yarışının şampiyonunda"
+                    if reliable else "ortak model kurallardan iyi değil")
     else:
         champion = previous
-        decision = "yeni model testi geçemedi; önceki güvenilir model korundu"
+        decision = "yeni ortak model testi geçemedi; önceki korundu (sıralama yetkisi model yarışında)"
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     if champion is candidate:
         with open(MODEL_FILE, "wb") as fh:
@@ -746,7 +746,10 @@ class Scorer:
         self.model = load_model()
         self.meta = json.loads(META_FILE.read_text(encoding="utf-8")) if META_FILE.exists() else None
         self.active = self.model is not None
-        self.reliable = bool(self.active and self.model.get("reliable"))
+        # Ortak model kendi (daha gevşek) testini geçse bile sıralama ve beklenen getiri yetkisi yok: bu yetki yalnızca
+        # model yarışının şampiyonlarında (research.py). Ortak model kazanma olasılığını göstermeye devam eder.
+        self.legacy_reliable = bool(self.active and self.model.get("reliable"))
+        self.reliable = False
         self.ctx: dict = {}
         if self.active:
             symbols = {m: g["yf_symbol"].tolist() for m, g in scan.groupby("market")}

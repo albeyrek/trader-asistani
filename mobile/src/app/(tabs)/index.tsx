@@ -90,7 +90,7 @@ export default function AssistantScreen() {
           </Pressable>
           <PortfolioCheck market={market} mk={mk} />
           <ScoreCard sc={score.data?.[market]} />
-          <ModelCard meta={model.data} market={market} />
+          <ModelCard meta={model.data} market={market} ranking={mk.ranking} champion={mk.champion} />
           <ExitsCard rep={exitsRep.data} market={market} />
           <Text style={[styles.disclaimer, { color: t.muted }]}>
             {data.disclaimer}
@@ -141,7 +141,6 @@ function StanceCard({ mk, market }: { mk: AssistantMarket; market: Market }) {
         {f.date(mk.date)} kapanışına göre {mk.screened} hisse tarandı; {mk.passed_filter} hisse süzgeçten geçti (yükseliş
         trendi, göreli güç ≥70, olumsuz haber ve uyarı yok, yakında bilanço yok), {mk.with_plan} tanesi için uygun ödül/risk
         planı çıktı.{mk.risk_scale < 1 ? ` Piyasa ortamı nedeniyle önerilen pozisyon büyüklüğü ×${f.num(mk.risk_scale, 2)}.` : ''}
-        {mk.ranking === 'model' ? ' Sıralamayı öğrenen model yaptı; beklenen getirisi düşük olanlar elendi.' : ''}
         {mk.ranking === 'champion' ? ` Sıralamayı model yarışının şampiyonu yaptı (${mk.champion}).` : ''}
         {market === 'BIST' ? ' Liste her iş günü ~18:45’te, ABD listesi sabah yenilenir.' : ' Liste her sabah (ABD kapanışından sonra) yenilenir.'}
       </Text>

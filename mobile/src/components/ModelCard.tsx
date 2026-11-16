@@ -10,7 +10,9 @@ import { useTheme } from '@/lib/theme';
 import type { Market, ModelMeta } from '@/lib/types';
 
 /** "Asistan nasıl öğreniyor": haftalık eğitim, ileriye dönük test sonuçları, strateji formu ve modelin neye baktığı. */
-export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined; market: Market }) {
+export function ModelCard({ meta, market, ranking, champion }: {
+  meta: ModelMeta | null | undefined; market: Market; ranking?: 'champion' | 'model' | 'rules'; champion?: string | null;
+}) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
   if (!meta) {
@@ -35,9 +37,9 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
       title="Asistan nasıl öğreniyor"
       right={
         <Chip
-          label={meta.reliable ? 'Model sıralıyor' : 'Kurallar sıralıyor'}
-          fg={meta.reliable ? t.up : t.warn}
-          bg={meta.reliable ? t.upBg : t.warnBg}
+          label={ranking === 'champion' ? 'Şampiyon model sıralıyor' : 'Kurallar sıralıyor'}
+          fg={ranking === 'champion' ? t.up : t.warn}
+          bg={ranking === 'champion' ? t.upBg : t.warnBg}
         />
       }>
       <Text style={[styles.text, { color: t.text }]}>
@@ -96,9 +98,9 @@ export function ModelCard({ meta, market }: { meta: ModelMeta | null | undefined
               ? `bu fark ${reg.weeks} haftalık testte anlamlı (t=${f.num(reg.edge_t, 1)}).`
               : `ama ${reg.weeks} haftalık testte bu fark şans eseri olabilecek kadar küçük (t=${f.num(reg.edge_t, 1)}; en az 2 gerekiyor).`)
           : ''}
-        {meta.reliable
-          ? ' Testi geçtiği için adayları model sıralıyor.'
-          : ' Bu yüzden adayları kurallar sıralıyor; model olasılığı bilgi olarak gösteriliyor. Her hafta yeniden denenir.'}
+        {ranking === 'champion'
+          ? ` Bu ortak model sıralamaz; ${f.marketLabel(market)} adaylarını model yarışının sıkı şartlarını geçen şampiyon (${champion ?? 'model'}) sıralıyor.`
+          : ' Sıralama yetkisi yalnızca model yarışının sıkı şartlarını (t ≥ 2,5, yılların çoğunda iyi) geçen modelde; bu piyasada geçen olmadığı için adayları kurallar sıralıyor. Model olasılığı bilgi olarak gösteriliyor.'}
         {' '}Asıl kazanç planın kendisinden geliyor: tüm kurulumların ortalaması {rText(reg.wk_all_r ?? reg.all_r)} (işlem
         maliyetleri hariç; bugün borsada olmayan hisseler veride yok).
         {offset != null && Math.abs(offset) > 0.1

@@ -447,15 +447,11 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         champion = scorer.champion_name(market)
         by_champion = bool(champion and rows and all(c["model"] and c["model"].get("rank") is not None for c in rows))
         if by_champion:
-            # Model yarışının şampiyonu (piyasaya özel, çıkış kuralının R'siyle sıkı testi geçti) sıralar
+            # Sıralama yetkisi yalnızca model yarışının şampiyonunda (piyasaya özel, çıkış kuralının R'siyle sıkı testi
+            # geçti: t >= 2,5, yılların çoğunda iyi, tek yıla dayanmıyor). Ortak eski model (learn.train) daha gevşek
+            # testini geçse bile sıralamaz ve aday elemez; yalnızca kazanma olasılığını gösterir.
             rows.sort(key=lambda c: -c["model"]["rank"])
             eligible = [c for c in rows if c["rs_rating"] >= min_rs]
-        elif scorer.reliable:
-            # Öğrenen model testten geçtiyse sıralamayı o yapar ve beklenen getirisi düşük adayları eler
-            rows.sort(key=lambda c: -c["model"]["exp_r"])
-            eligible = [c for c in rows if c["rs_rating"] >= min_rs]
-            rejected = sum(c["model"]["exp_r"] <= MIN_EXP_R for c in eligible)
-            eligible = [c for c in eligible if c["model"]["exp_r"] > MIN_EXP_R]
         else:
             rows.sort(key=lambda c: -c["quality"])
             eligible = [c for c in rows if c["rs_rating"] >= min_rs]
@@ -491,7 +487,7 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
             "backtest": backtest,
             "form": {k: form[k] for k in ("recent_r", "recent_n", "recent_win", "long_r", "long_n", "effective")}
             if form else None,
-            "ranking": "champion" if by_champion else "model" if scorer.reliable else "rules",
+            "ranking": "champion" if by_champion else "rules",
             "champion": champion if by_champion else None,
             "screened": int(len(g)), "passed_filter": int(len(pre)), "with_plan": len(rows),
             "candidates": picked,
