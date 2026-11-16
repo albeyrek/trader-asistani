@@ -10,7 +10,7 @@ on:
         required: true
         default: drawdown
         type: choice
-        options: [drawdown, diversify, exits, research]
+        options: [drawdown, diversify, exitlab, research]
 
 permissions:
   contents: read
@@ -57,6 +57,7 @@ jobs:
             backend/research_output.txt
             backend/data/model/drawdown_test.json
             backend/data/model/diversify_test.json
+            backend/data/model/exitlab_test.json
             backend/data/model/research.json
             backend/data/exits_report.txt
           if-no-files-found: ignore
