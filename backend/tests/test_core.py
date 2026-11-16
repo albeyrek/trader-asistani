@@ -296,3 +296,20 @@ def test_paper_drawdown_brake_halves_next_position():
     assert win_braked["pnl"] == pytest.approx(win_plain["pnl"] / 2, rel=0.03)
     dd = paper.simulate(sig, px, "BIST", brake={"kind": "dd", "level": -0.005, "scale": 0.5})
     assert dd["brake_buys"] == 1
+
+
+def test_paper_sector_cap_blocks_fourth_position_in_sector():
+    n = 30
+    frames = [_px("XU100.IS", [(1000, 1000, 1000, 1000)] * n)]
+    sigs = []
+    for i, sym in enumerate(["A1", "A2", "A3", "A4", "B1"]):
+        frames.append(_px(f"{sym}.IS", [(100, 100, 100, 100)] * 25 + [(100, 101, 99, 100)] + [(100, 100.5, 99.5, 100)] * 4).assign(volume=1e8))
+        sigs.append(_signal(pd.bdate_range("2026-01-05", periods=n)[24], symbol=sym, yf=f"{sym}.IS"))
+    px, sig = pd.concat(frames, ignore_index=True), pd.concat(sigs, ignore_index=True)
+    sectors = {"A1.IS": "a", "A2.IS": "a", "A3.IS": "a", "A4.IS": "a", "B1.IS": "b"}
+    free = paper.simulate(sig, px, "BIST", risk_pct=0.005)
+    capped = paper.simulate(sig, px, "BIST", risk_pct=0.005, sector_cap=3, sector_of=sectors)
+    assert free["open_count"] == 5
+    assert capped["open_count"] == 4  # dördüncü "a" sektörü hissesi alınmadı
+    held = {p["symbol"] for p in capped["open"]}
+    assert len([s for s in held if s.startswith("A")]) == 3 and "B1" in held

@@ -76,14 +76,18 @@ def anomalies(prices: pd.DataFrame, market: str) -> set[str]:
 
 
 def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: str | None = None,
-             max_closed: int = 40, idle: str = "cash", brake: dict | None = None) -> dict:
+             max_closed: int = 40, idle: str = "cash", brake: dict | None = None,
+             risk_pct: float = RISK_PCT, max_positions: int = MAX_POSITIONS,
+             sector_cap: int | None = None, sector_of: dict[str, str] | None = None) -> dict:
     """signals: date (liste günü), symbol, yf, entry_low, entry_high, stop, target1, atr, exit_rule (dict|None),
     risk_scale. Günlük adımlarla nakit, pozisyon ve özsermaye izlenir.
     idle: boştaki para "cash" (getirisiz nakit) ya da "index" (gün sonunda endeks fonuna; yeni alım için açılışta
     satılır; her yönde IDX_COST maliyet).
     brake: düşüş kontrolü (yalnızca o güne kadar bilinenle; yeni alımlarda pozisyon çarpanı):
       {"kind": "dd", "level": -0.15, "scale": 0.5}  portföy zirvesinden düşüş level'ın altındaysa
-      {"kind": "form", "n": 10, "scale": 0.5}         son n kapanan işlemin ortalama R'si <= 0 ise"""
+      {"kind": "form", "n": 10, "scale": 0.5}         son n kapanan işlemin ortalama R'si <= 0 ise
+    risk_pct, max_positions: işlem başına risk ve en fazla açık pozisyon (varsayılan: RISK_PCT, MAX_POSITIONS).
+    sector_cap: aynı sektörde en fazla bu kadar açık pozisyon (sector_of: yahoo kodu -> sektör)."""
     idx = _bars(prices, MAIN_INDEX[market])
     if idx is None or signals.empty:
         return {}
@@ -191,7 +195,10 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
                 continue
             o, h, l, c, prev = b.loc[d, ["open", "high", "low", "close", "prev"]]
             limit_up = bist and pd.notna(prev) and o >= prev * LIMIT_UP_OPEN
-            if (l <= s.entry_high and h >= s.entry_low and not limit_up and len(positions) < MAX_POSITIONS
+            sector_full = bool(sector_cap and sector_of and sector_of.get(s.yf) and sum(
+                sector_of.get(p["yf"]) == sector_of[s.yf] for p in positions.values()) >= sector_cap)
+            if (l <= s.entry_high and h >= s.entry_low and not limit_up and len(positions) < max_positions
+                    and not sector_full
                     and key not in positions):
                 fill = float(min(max(o, s.entry_low), s.entry_high))
                 risk = fill - s.stop
@@ -204,7 +211,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
                     liquidity_cap = PARTICIPATION * tv / fill if pd.notna(tv) and tv > 0 else 0
                     ix_open = idx.loc[d, "open"]
                     avail = cash + idle_units * ix_open * (1 - IDX_COST)  # endeksteki para satılarak kullanılabilir
-                    shares = math.floor(min(eq * RISK_PCT * scale / risk, eq * MAX_POS_PCT / fill,
+                    shares = math.floor(min(eq * risk_pct * scale / risk, eq * MAX_POS_PCT / fill,
                                             avail / (fill * (1 + cost)), liquidity_cap))
                     if shares > 0:
                         rule = s.exit_rule if isinstance(s.exit_rule, dict) else assistant_track.BASE_RULE
@@ -296,7 +303,8 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
         + ([[curve[-1][0].date().isoformat(), round(curve[-1][1], 2), round(curve[-1][2], 2)]] if step > 1 else []),
         "open": sorted(open_rows, key=lambda x: -x["value"]),
         "closed": list(reversed(closed))[:max_closed],
-        "settings": {"risk_pct": RISK_PCT * 100, "max_pos_pct": MAX_POS_PCT * 100, "max_positions": MAX_POSITIONS,
+        "settings": {"risk_pct": risk_pct * 100, "max_pos_pct": MAX_POS_PCT * 100, "max_positions": max_positions,
+                     "sector_cap": sector_cap,
                      "cost_pct": COST[market] * 100, "entry_days": ENTRY_DAYS},
     }
 
@@ -356,7 +364,7 @@ def regime_labels(g: pd.DataFrame, prices: pd.DataFrame, market: str) -> pd.Seri
     return pd.Series([next(lab for th, lab, _ in REGIMES if s >= th) for s in score], index=g.index)
 
 
-def backtest_signals() -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict, list[str]]]]:
+def backtest_signals(top_k: int = BACKTEST_TOP_K) -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict, list[str]]]]:
     """Test portföyünün girdileri: (fiyatlar, piyasa -> (sinyaller, yıl yıl çıkış kuralı, çıkarılan hisseler))."""
     from . import assistant, exits, history as hist, learn
     samples = pd.read_parquet(learn.SAMPLES_FILE)
@@ -374,7 +382,7 @@ def backtest_signals() -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict
         ranked = g.sort_values("quality", ascending=False)
         rank = ranked.groupby("date").cumcount()
         limit = ranked["regime"].map(lambda r: assistant.REGIME_LIMITS[r][0])
-        top = ranked[rank < np.minimum(BACKTEST_TOP_K, limit)]
+        top = ranked[rank < np.minimum(top_k, limit)]
         wf = {y["year"]: y["chosen"] for y in rep.get("walk_forward", {}).get("live", {}).get(market, {}).get("years", [])}
         rule_of = lambda d: ({"name": wf[d.year], **exits.POLICIES[wf[d.year]][1]} if d.year in wf else None)  # noqa: E731
         sig = pd.DataFrame({
