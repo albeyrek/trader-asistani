@@ -280,3 +280,19 @@ def test_static_json_files_valid():
     assert all({"date", "kind", "title", "detail"} <= set(e) for e in log)
     road = json.loads((root / "roadmap.json").read_text(encoding="utf-8"))
     assert all(i["status"] in {"done", "active", "next", "planned", "dropped"} for p in road["phases"] for i in p["items"])
+
+
+def test_paper_drawdown_brake_halves_next_position():
+    flat = [(100, 100, 100, 100)] * 25
+    rows = flat + [(100, 101, 99, 100), (96, 96, 94, 95)] + [(100, 100, 100, 100)] * 3 + [(100, 101, 99, 100), (104, 111, 103, 110)]
+    px = _market(rows)
+    days = pd.bdate_range("2026-01-05", periods=len(rows))
+    sig = pd.concat([_signal(days[24]), _signal(days[29])], ignore_index=True)  # ikinci sinyal ilk işlem kapandıktan sonra
+    plain = paper.simulate(sig, px, "BIST")
+    braked = paper.simulate(sig, px, "BIST", brake={"kind": "form", "n": 1, "scale": 0.5})
+    win_plain = next(t for t in plain["closed"] if t["how"] == "target")
+    win_braked = next(t for t in braked["closed"] if t["how"] == "target")
+    assert plain["trades"] == braked["trades"] == 2 and braked["brake_buys"] == 1
+    assert win_braked["pnl"] == pytest.approx(win_plain["pnl"] / 2, rel=0.03)
+    dd = paper.simulate(sig, px, "BIST", brake={"kind": "dd", "level": -0.005, "scale": 0.5})
+    assert dd["brake_buys"] == 1

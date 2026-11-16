@@ -72,11 +72,14 @@ def anomalies(prices: pd.DataFrame, market: str) -> set[str]:
 
 
 def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: str | None = None,
-             max_closed: int = 40, idle: str = "cash") -> dict:
+             max_closed: int = 40, idle: str = "cash", brake: dict | None = None) -> dict:
     """signals: date (liste günü), symbol, yf, entry_low, entry_high, stop, target1, atr, exit_rule (dict|None),
     risk_scale. Günlük adımlarla nakit, pozisyon ve özsermaye izlenir.
     idle: boştaki para "cash" (getirisiz nakit) ya da "index" (gün sonunda endeks fonuna; yeni alım için açılışta
-    satılır; her yönde IDX_COST maliyet)."""
+    satılır; her yönde IDX_COST maliyet).
+    brake: düşüş kontrolü (yalnızca o güne kadar bilinenle; yeni alımlarda pozisyon çarpanı):
+      {"kind": "dd", "level": -0.15, "scale": 0.5}  portföy zirvesinden düşüş level'ın altındaysa
+      {"kind": "form", "n": 10, "scale": 0.5}         son n kapanan işlemin ortalama R'si <= 0 ise"""
     idx = _bars(prices, MAIN_INDEX[market])
     if idx is None or signals.empty:
         return {}
@@ -100,6 +103,15 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
     by_day = {d: g for d, g in signals.groupby("date")}
     index_units = CAPITAL[market] / idx.loc[days[0], "open"]  # ilk gün açılışta endeks alınsaydı
     peak_eq, max_dd, peak_ix, max_dd_ix = 0.0, 0.0, 0.0, 0.0
+    brake_buys = [0]  # frenli alım sayısı (iç fonksiyondan değiştirilebilsin diye liste)
+
+    def braking() -> bool:
+        if not brake:
+            return False
+        if brake["kind"] == "dd":
+            return bool(peak_eq) and eq / peak_eq - 1 <= brake["level"]
+        rs_ = [c["r"] for c in closed[-brake["n"]:]]
+        return len(rs_) >= brake["n"] and float(np.mean(rs_)) <= 0
     invested_share = []
 
     def equity_at(d) -> float:
@@ -181,6 +193,9 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
                 risk = fill - s.stop
                 if risk > 0:
                     scale = s.risk_scale if pd.notna(s.risk_scale) else 1.0
+                    if braking():
+                        scale *= brake["scale"]
+                        brake_buys[0] += 1
                     tv = b.loc[d, "tv"]
                     liquidity_cap = PARTICIPATION * tv / fill if pd.notna(tv) and tv > 0 else 0
                     ix_open = idx.loc[d, "open"]
@@ -262,6 +277,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
     step = 1 if len(curve) <= 400 else 5  # uzun testte haftalık nokta (dosya küçük kalsın)
     return {
         "market": market, "currency": CURRENCY[market], "capital": CAPITAL[market], "idle": idle,
+        **({"brake": brake, "brake_buys": brake_buys[0]} if brake else {}),
         "start": days[0].date().isoformat(), "end": last.date().isoformat(),
         "equity": round(eq_final, 2), "return_pct": round((eq_final / CAPITAL[market] - 1) * 100, 2),
         "index_return_pct": round((ix_final / CAPITAL[market] - 1) * 100, 2),
@@ -327,11 +343,8 @@ def regime_labels(g: pd.DataFrame, prices: pd.DataFrame, market: str) -> pd.Seri
     return pd.Series([next(lab for th, lab, _ in REGIMES if s >= th) for s in score], index=g.index)
 
 
-def backtest() -> dict:
-    """Yeniden oynatma örneklerinden her hafta canlı süzgeçten geçen ilk BACKTEST_TOP_K kurulum (asistanın sıralaması);
-    çıkış kuralı her yıl, o yıldan önceki yıllarda en iyi olan kuraldır (exits.py kayan seçim: geleceği görmeden).
-    Canlı asistanın rejim kuralları da uygulanır: zayıf piyasada liste kısalır ve pozisyon küçülür (REGIME_LIMITS),
-    ABD'de zayıf/ayı piyasada yalnızca göreli gücü yüksek hisseler (BEAR_MIN_RS)."""
+def backtest_signals() -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict, list[str]]]]:
+    """Test portföyünün girdileri: (fiyatlar, piyasa -> (sinyaller, yıl yıl çıkış kuralı, çıkarılan hisseler))."""
     from . import assistant, exits, history as hist, learn
     samples = pd.read_parquet(learn.SAMPLES_FILE)
     samples = samples[learn.live_like(samples) & (samples["date"] >= BACKTEST_START)].copy()
@@ -349,7 +362,6 @@ def backtest() -> dict:
         rank = ranked.groupby("date").cumcount()
         limit = ranked["regime"].map(lambda r: assistant.REGIME_LIMITS[r][0])
         top = ranked[rank < np.minimum(BACKTEST_TOP_K, limit)]
-
         wf = {y["year"]: y["chosen"] for y in rep.get("walk_forward", {}).get("live", {}).get(market, {}).get("years", [])}
         rule_of = lambda d: ({"name": wf[d.year], **exits.POLICIES[wf[d.year]][1]} if d.year in wf else None)  # noqa: E731
         sig = pd.DataFrame({
@@ -358,11 +370,23 @@ def backtest() -> dict:
             "atr": top["atr_pct"] / 100 * top["close"], "exit_rule": [rule_of(d) for d in top["date"]],
             "risk_scale": top["regime"].map(lambda r: assistant.REGIME_LIMITS[r][1]),
         })
+        out[market] = (sig, wf, sorted(s.removesuffix(".IS") for s in bad))
+    return prices, out
+
+
+def backtest() -> dict:
+    """Yeniden oynatma örneklerinden her hafta canlı süzgeçten geçen ilk BACKTEST_TOP_K kurulum (asistanın sıralaması);
+    çıkış kuralı her yıl, o yıldan önceki yıllarda en iyi olan kuraldır (exits.py kayan seçim: geleceği görmeden).
+    Canlı asistanın rejim kuralları da uygulanır: zayıf piyasada liste kısalır ve pozisyon küçülür (REGIME_LIMITS),
+    ABD'de zayıf/ayı piyasada yalnızca göreli gücü yüksek hisseler (BEAR_MIN_RS)."""
+    prices, inputs = backtest_signals()
+    out = {}
+    for market, (sig, wf, excluded) in inputs.items():
         res = simulate(sig, prices, market, start=BACKTEST_START)
         if res:
             res["idle_index"] = idle_summary(simulate(sig, prices, market, start=BACKTEST_START, idle="index"))
             res["rules_by_year"] = {str(y): r for y, r in sorted(wf.items())}
-            res["excluded"] = sorted(s.removesuffix(".IS") for s in bad)
+            res["excluded"] = excluded
             out[market] = res
     return out
 

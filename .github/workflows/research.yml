@@ -1,0 +1,61 @@
+# Araştırma: tek seferlik testler (ör. düşüş kontrolü) bulutta, haftalık öğrenmenin verisiyle çalışır.
+# Önbelleği yalnızca okur (günlük tarama ve öğrenmenin verisini değiştirmez); sonuç günlükte ve indirilebilir dosyada.
+name: Arastirma
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Çalıştırılacak araştırma"
+        required: true
+        default: drawdown
+        type: choice
+        options: [drawdown, research]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      - name: Onceki veriyi yukle (salt okunur)
+        uses: actions/cache/restore@v4
+        with:
+          path: backend/data
+          key: data-research-${{ github.run_id }}
+          restore-keys: data-
+
+      - name: Uzun fiyat gecmisi
+        run: python -m scanner.history
+
+      - name: Arastirma
+        run: python -m scanner.${{ inputs.module }} 2>&1 | tee research_output.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arastirma-${{ inputs.module }}
+          path: |
+            backend/research_output.txt
+            backend/data/model/drawdown_test.json
+            backend/data/model/research.json
+          if-no-files-found: ignore
+          retention-days: 14
