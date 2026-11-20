@@ -313,3 +313,23 @@ def test_paper_sector_cap_blocks_fourth_position_in_sector():
     assert capped["open_count"] == 4  # dördüncü "a" sektörü hissesi alınmadı
     held = {p["symbol"] for p in capped["open"]}
     assert len([s for s in held if s.startswith("A")]) == 3 and "B1" in held
+
+
+def test_partial_new_day_bars_dropped_and_not_counted_missing():
+    # 4 BIST hissesi 3 gün tam; yalnızca 1 hissede gece yarısı gelen yarım "yeni gün" mumu var
+    full = pd.concat([_px(f"S{i}.IS", [(10, 10, 10, 10)] * 3) for i in range(4)], ignore_index=True)
+    partial = _px("S0.IS", [(10, 10, 10, 10)] * 4)  # 4. gün yalnızca S0'da
+    df = pd.concat([full, partial[partial["date"] == partial["date"].max()]], ignore_index=True)
+    syms = [f"S{i}.IS" for i in range(4)]
+    last = prices.market_last_day(df, syms)
+    assert last["BIST"] == full["date"].max()  # çoğunluğun son günü
+    assert prices.missing_latest(df, syms) == []  # diğer hisseler "eksik" sayılmaz
+    out = prices.drop_partial_days(df, syms)
+    assert out["date"].max() == full["date"].max() and len(out) == len(full)
+
+
+def test_market_last_day_follows_majority_when_new_day_arrives():
+    df = pd.concat([_px(f"S{i}.IS", [(10, 10, 10, 10)] * (4 if i < 3 else 3)) for i in range(4)], ignore_index=True)
+    syms = [f"S{i}.IS" for i in range(4)]
+    assert prices.market_last_day(df, syms)["BIST"] == df["date"].max()  # 3/4 yeni günde: yeni gün geçerli
+    assert prices.missing_latest(df, syms) == ["S3.IS"]

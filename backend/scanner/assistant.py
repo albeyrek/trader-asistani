@@ -389,9 +389,13 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         if data_issue:
             limit = 0
         pre = prefilter(g)
-        pre = pre[[events.days_until(side.events.get(f"{market}:{s}")) is None
-                   or not (0 <= events.days_until(side.events.get(f"{market}:{s}")) <= EARNINGS_BLACKOUT)
-                   or side.events[f"{market}:{s}"]["status"] == "reported" for s in pre["symbol"]]]
+        # Bilanço yaklaşan hisseler çıkarılır. Maske boolean Series olmalı: süzgeçten hiç hisse geçmezse boş liste
+        # pre[[]] sütun seçimi olur ve tablo sütunsuz kalır (Kasım 2026'da günlük taramayı bu çökertti).
+        keep = pd.Series([events.days_until(side.events.get(f"{market}:{s}")) is None
+                          or not (0 <= events.days_until(side.events.get(f"{market}:{s}")) <= EARNINGS_BLACKOUT)
+                          or side.events[f"{market}:{s}"]["status"] == "reported" for s in pre["symbol"]],
+                         index=pre.index, dtype=bool)
+        pre = pre[keep]
         px = prices[prices["yf_symbol"].isin(pre["yf_symbol"])]
         by = dict(tuple(px.groupby("yf_symbol")))
         rows = []

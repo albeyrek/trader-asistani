@@ -15,6 +15,7 @@ BIST_REVERSE_GAP = 0.35
 RETRY_PERIOD = "5d"
 RETRY_PAUSE_SEC = 10
 RETRY_RECENT_DAYS = 7
+CONSENSUS_SHARE = 0.5  # piyasanın son günü: hisselerin en az yarısının fiyatı olan en yeni gün
 
 
 def _download_chunk(symbols: list[str], period: str) -> pd.DataFrame:
@@ -72,15 +73,54 @@ def fix_bist_splits(df: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([df[~bist], g], ignore_index=True)
 
 
+def _market_of(symbol: str) -> str:
+    return "BIST" if symbol.endswith(".IS") else "US"
+
+
+def market_last_day(df: pd.DataFrame, symbols: list[str]) -> dict[str, pd.Timestamp]:
+    """Piyasa başına son işlem günü: son RETRY_RECENT_DAYS günde işlem gören hisselerin en az CONSENSUS_SHARE'inin
+    fiyatı olan en yeni gün. (En büyük tarih değil: tarama gece yarısı civarında çalışınca Yahoo bazı hisselere yeni
+    günün yarım/boş mumunu gönderiyor; birkaç hissenin tarihi bütün piyasanın son günü sayılırsa diğerlerinin hepsi
+    "eski" görünür. Kasım 2026'da bu yüzden günlük tarama bir hafta yayınlanamadı.)"""
+    stocks = [s for s in symbols if not any(ch in s for ch in "^=")]
+    d = df[df["yf_symbol"].isin(stocks)][["yf_symbol", "date"]]
+    if d.empty:
+        return {}
+    out = {}
+    for market, g in d.groupby(d["yf_symbol"].map(_market_of)):
+        recent = g[g["date"] >= g["date"].max() - pd.Timedelta(days=RETRY_RECENT_DAYS)]
+        active = recent["yf_symbol"].nunique()
+        counts = recent.groupby("date")["yf_symbol"].nunique().sort_index(ascending=False)
+        ok = counts[counts >= CONSENSUS_SHARE * active]
+        out[market] = ok.index[0] if len(ok) else g["date"].max()
+    return out
+
+
+def drop_partial_days(df: pd.DataFrame, symbols: list[str]) -> pd.DataFrame:
+    """Piyasanın son işlem gününden (market_last_day) sonraki mumlar atılır (yarım/boş gün; sonraki tarama yeniden
+    indirir). Endeksler de kendi piyasasına göre; döviz (=) dokunulmaz."""
+    last = market_last_day(df, symbols)
+    if not last:
+        return df
+    fx = df["yf_symbol"].str.contains("=", regex=False)
+    limit = df["yf_symbol"].map(lambda s: last.get(_market_of(s)))
+    drop = ~fx & limit.notna() & (df["date"] > limit)
+    if drop.any():
+        days = sorted({d.date().isoformat() for d in df.loc[drop, "date"]})
+        print(f"  yarım gün atıldı: {int(drop.sum())} mum ({', '.join(days)}; piyasanın son günü "
+              f"{', '.join(f'{m} {d.date()}' for m, d in last.items())})")
+    return df[~drop]
+
+
 def missing_latest(df: pd.DataFrame, symbols: list[str]) -> list[str]:
-    """Piyasasının son işlem gününün fiyatı olmayan ama son RETRY_RECENT_DAYS günde işlem görmüş hisseler.
+    """Piyasasının son işlem gününün (market_last_day) fiyatı olmayan ama son RETRY_RECENT_DAYS günde işlem görmüş hisseler.
     Endeks ve döviz kodları (^, =) hariç: döviz hafta sonu da işlem görüp "son günü" kaydırabiliyor."""
     stocks = [s for s in symbols if not any(ch in s for ch in "^=")]
     last = df[df["yf_symbol"].isin(stocks)].groupby("yf_symbol")["date"].max()
     if last.empty:
         return []
-    group = last.index.map(lambda s: "BIST" if s.endswith(".IS") else "US")
-    newest = last.groupby(group).transform("max")
+    consensus = market_last_day(df, symbols)
+    newest = pd.Series([consensus[_market_of(s)] for s in last.index], index=last.index)
     return last[(last < newest) & (last >= newest - pd.Timedelta(days=RETRY_RECENT_DAYS))].index.tolist()
 
 
@@ -111,6 +151,7 @@ def update_prices(yf_symbols: list[str]) -> pd.DataFrame:
     else:
         df = download_prices(yf_symbols, HISTORY_PERIOD)
     df = _retry_missing(df, yf_symbols)
+    df = drop_partial_days(df, yf_symbols)
     df = fix_bist_splits(df)
     df = df.sort_values(["yf_symbol", "date"]).reset_index(drop=True)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
