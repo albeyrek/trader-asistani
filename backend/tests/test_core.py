@@ -333,3 +333,37 @@ def test_market_last_day_follows_majority_when_new_day_arrives():
     syms = [f"S{i}.IS" for i in range(4)]
     assert prices.market_last_day(df, syms)["BIST"] == df["date"].max()  # 3/4 yeni günde: yeni gün geçerli
     assert prices.missing_latest(df, syms) == ["S3.IS"]
+
+
+def _scan_rows(n: int, score: float, date: str = "2026-11-20"):
+    return pd.DataFrame([{
+        "market": "BIST", "symbol": f"S{i}", "yf_symbol": f"S{i}.IS", "name": f"Hisse {i}", "sector": "Banka",
+        "date": date, "combined_score": score, "daily_score": score, "weekly_score": score, "rs_rating": 90.0,
+        "rsi": 55.0, "news_score": 0.0, "news_risk": "Düşük", "overall_risk": "Orta", "alerts": "[]", "close": 10.0,
+        "change_pct": 0.0, "daily_reasons": "[]", "top_news": "[]",
+    } for i in range(n)])
+
+
+def test_assistant_survives_day_with_no_candidates(tmp_path, monkeypatch):
+    """Kasım 2026: süzgeçten hiç hisse geçmeyen günde asistan çöktü ve günlük tarama bir hafta yayınlanamadı."""
+    from types import SimpleNamespace
+    from scanner import assistant, exits, learn, research
+    from scanner import paper as paper_mod
+    monkeypatch.setattr(learn, "load_model", lambda: None)  # model dosyası olmayan ortam (CI) ile aynı
+    monkeypatch.setattr(learn, "META_FILE", tmp_path / "yok.json")
+    monkeypatch.setattr(research, "load_champion", lambda m: None)
+    monkeypatch.setattr(exits, "REPORT_JSON", tmp_path / "yok_exits.json")
+    monkeypatch.setattr(paper_mod, "BACKTEST_FILE", tmp_path / "yok_paper.json")
+    side = SimpleNamespace(events={}, fund={}, sector_info=lambda m, s: None)
+    overview = {"BIST": {"regime": {"label": "Ayı", "score": -4, "summary": "Endeks düşüşte"}}}
+    prices = _px("S0.IS", [(10, 10, 10, 10)] * 5)
+    scan = _scan_rows(3, score=5.0)  # teknik skor süzgeç eşiğinin altında: hiç aday yok
+    out = assistant.candidates(scan, prices, overview, side, agenda=None, health=None)
+    assert out["BIST"]["candidates"] == [] and out["BIST"]["passed_filter"] == 0
+    assert out["BIST"]["ranking"] == "rules" and out["BIST"]["stance"]
+    # Bilançosu yaklaşan tek aday da elenince (maske boş değil ama sonuç boş) yine çökmemeli
+    scan2 = _scan_rows(1, score=50.0)
+    side2 = SimpleNamespace(events={"BIST:S0": {"date": pd.Timestamp.now().date().isoformat(), "status": "expected"}},
+                            fund={}, sector_info=lambda m, s: None)
+    out2 = assistant.candidates(scan2, prices, overview, side2, agenda=None, health=None)
+    assert out2["BIST"]["passed_filter"] == 0 and out2["BIST"]["candidates"] == []

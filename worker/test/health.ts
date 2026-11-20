@@ -1,5 +1,5 @@
 // Sistem sağlığı uyarısının testi: npx tsx test/health.ts
-import { healthAlert, STALE_MS, trDay, type Health } from '../src/health';
+import { expectedScanAt, healthAlert, trDay, type Health } from '../src/health';
 
 let fail = 0;
 function check(name: string, ok: boolean, detail = '') {
@@ -23,8 +23,18 @@ check('hata bildirimi', !!err && err.body.includes('%62') && err.body.includes('
 // Hafta sonu: cuma 22:15 -> pazartesi akşamı normal, uyarı yok
 check('hafta sonu boşluğu normal', healthAlert({ ...base, generated_at: '2026-11-13T22:20:00Z' },
   Date.parse('2026-11-16T21:00:00Z')) === null);
-const stale = healthAlert({ ...base, generated_at: new Date(now - STALE_MS - 3600_000).toISOString() }, now);
-check('tarama günlerdir çalışmadı', !!stale && stale.title.includes('çalışmadı'), stale?.body);
+// Kasım 2026: pazartesi akşamı tarama çöktü (son yayın pazartesi 07:41). Uyarı ertesi sabah gelmeli, 3 gün sonra değil
+const monday = { ...base, generated_at: '2026-11-16T07:41:00Z' };
+const tueMorning = healthAlert(monday, Date.parse('2026-11-17T09:00:00Z'));
+check('kaçan tarama: ertesi sabah uyarı', !!tueMorning && tueMorning.title.includes('yayınlanmadı') && tueMorning.body.includes('25 saat'),
+  tueMorning?.body);
+check('pazartesi gece henüz erken (gecikme payı)', healthAlert(monday, Date.parse('2026-11-16T23:00:00Z')) === null);
+const late = healthAlert({ ...base, generated_at: '2026-11-16T23:50:00Z' }, Date.parse('2026-11-17T03:00:00Z'));
+check('saatlerce gecikmiş ama yayınlanmış tarama normal', late === null, late?.body);
+const week = healthAlert(monday, Date.parse('2026-11-20T16:00:00Z'));
+check('günlerce yayın yok: gün olarak', !!week && week.body.includes('4 gün'), week?.body);
+check('cumartesi sabahı beklenen: cuma 22:15', expectedScanAt(Date.parse('2026-11-21T09:00:00Z')) === Date.parse('2026-11-20T22:15:00Z'));
+check('pazartesi öğlen beklenen: cuma 22:15', expectedScanAt(Date.parse('2026-11-23T12:00:00Z')) === Date.parse('2026-11-20T22:15:00Z'));
 check('Türkiye günü (UTC+3)', trDay(Date.parse('2026-11-16T22:30:00Z')) === '2026-11-17');
 
 if (fail) {
