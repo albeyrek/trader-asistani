@@ -104,7 +104,8 @@ def anomalies(prices: pd.DataFrame, market: str) -> set[str]:
 def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: str | None = None,
              max_closed: int = 40, idle: str = "cash", brake: dict | None = None,
              risk_pct: float = RISK_PCT, max_positions: int = MAX_POSITIONS,
-             sector_cap: int | None = None, sector_of: dict[str, str] | None = None) -> dict:
+             sector_cap: int | None = None, sector_of: dict[str, str] | None = None,
+             cooldown_days: int = 0, week_cap: int | None = None) -> dict:
     """signals: date (liste günü), symbol, yf, entry_low, entry_high, stop, target1, atr, exit_rule (dict|None),
     risk_scale. Günlük adımlarla nakit, pozisyon ve özsermaye izlenir.
     idle: boştaki para "cash" (getirisiz nakit) ya da "index" (gün sonunda endeks fonuna; yeni alım için açılışta
@@ -113,7 +114,9 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
       {"kind": "dd", "level": -0.15, "scale": 0.5}  portföy zirvesinden düşüş level'ın altındaysa
       {"kind": "form", "n": 10, "scale": 0.5}         son n kapanan işlemin ortalama R'si <= 0 ise
     risk_pct, max_positions: işlem başına risk ve en fazla açık pozisyon (varsayılan: RISK_PCT, MAX_POSITIONS).
-    sector_cap: aynı sektörde en fazla bu kadar açık pozisyon (sector_of: yahoo kodu -> sektör)."""
+    sector_cap: aynı sektörde en fazla bu kadar açık pozisyon (sector_of: yahoo kodu -> sektör).
+    cooldown_days: bir hisse stop olunca bu kadar iş günü o hisseye yeniden girilmez.
+    week_cap: bir takvim haftasında en fazla bu kadar yeni pozisyon (aynı hafta açılıp birlikte stop olmasın)."""
     idx = _bars(prices, MAIN_INDEX[market])
     if idx is None or signals.empty:
         return {}
@@ -138,6 +141,12 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
     index_units = CAPITAL[market] / idx.loc[days[0], "open"]  # ilk gün açılışta endeks alınsaydı
     peak_eq, max_dd, peak_ix, max_dd_ix = 0.0, 0.0, 0.0, 0.0
     brake_buys = [0]  # frenli alım sayısı (iç fonksiyondan değiştirilebilsin diye liste)
+    last_stop: dict[str, pd.Timestamp] = {}  # hisse -> son stop günü (cooldown_days)
+    week_buys: dict[tuple, int] = {}  # (yıl, hafta) -> yeni pozisyon sayısı (week_cap)
+
+    def cooling(key: str, d) -> bool:
+        return bool(cooldown_days and key in last_stop
+                    and np.busday_count(last_stop[key].date(), d.date()) < cooldown_days)
 
     def braking() -> bool:
         if not brake:
@@ -206,6 +215,8 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
                                "exit_date": d.date().isoformat(), "exit": round(float(exit_px), 4), "how": how,
                                "pnl": round(float(pnl), 2), "pnl_pct": round(float(pnl / p["cost_basis"] * 100), 2),
                                "r": round(float(r), 2), "days": p["held"] + (1 if how == "stop" else 0)})
+                if how == "stop":
+                    last_stop[key] = d
                 del positions[key]
 
         # 2) bekleyen emirler: giriş bölgesine gelen alınır
@@ -223,8 +234,13 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
             limit_up = bist and pd.notna(prev) and o >= prev * LIMIT_UP_OPEN
             sector_full = bool(sector_cap and sector_of and sector_of.get(s.yf) and sum(
                 sector_of.get(p["yf"]) == sector_of[s.yf] for p in positions.values()) >= sector_cap)
+            wk = tuple(d.isocalendar()[:2])
+            week_full = bool(week_cap and week_buys.get(wk, 0) >= week_cap)
+            if cooling(key, d):
+                del pending[key]  # stop sonrası bekleme: bu hisseye şimdilik girilmez
+                continue
             if (l <= s.entry_high and h >= s.entry_low and not limit_up and len(positions) < max_positions
-                    and not sector_full
+                    and not sector_full and not week_full
                     and key not in positions):
                 fill = float(min(max(o, s.entry_low), s.entry_high))
                 risk = fill - s.stop
@@ -250,6 +266,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
                             idle_units -= sell
                             cash += sell * ix_open * (1 - IDX_COST)
                         cash -= need
+                        week_buys[wk] = week_buys.get(wk, 0) + 1
                         positions[key] = {
                             "yf": s.yf, "shares": shares, "fill": fill, "risk": risk, "stop": s.stop, "cur_stop": s.stop,
                             "peak": fill, "target": target, "hold": rule["hold"], "trail": rule.get("trail"),
@@ -266,6 +283,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
                                            "exit_date": d.date().isoformat(), "exit": round(float(px), 4), "how": "stop",
                                            "pnl": round(float(pnl), 2), "pnl_pct": round(float(pnl / positions[key]["cost_basis"] * 100), 2),
                                            "r": -1.0, "days": 1})
+                            last_stop[key] = d
                             del positions[key]
                         else:
                             positions[key]["peak"] = max(fill, c)
@@ -278,7 +296,7 @@ def simulate(signals: pd.DataFrame, prices: pd.DataFrame, market: str, start: st
 
         # 3) günün listesi: ertesi günden itibaren bekleyen emir
         for s in by_day.get(d, pd.DataFrame()).itertuples() if d in by_day else []:
-            if s.symbol not in positions and s.symbol not in pending:
+            if s.symbol not in positions and s.symbol not in pending and not cooling(s.symbol, d):
                 pending[s.symbol] = {"s": s, "left": ENTRY_DAYS}
 
         # 4) boştaki nakit (idle="index"): haftanın son günü, IDLE_BUFFER'ın üstündeki nakit endeks fonuna yatırılır
@@ -418,6 +436,7 @@ def backtest_signals(top_k: int | None = None) -> tuple[pd.DataFrame, dict[str, 
             "entry_low": top["entry_low"], "entry_high": top["entry_high"], "stop": top["stop"], "target1": top["target1"],
             "atr": top["atr_pct"] / 100 * top["close"], "exit_rule": [rule_of(d) for d in top["date"]],
             "risk_scale": top["regime"].map(lambda r: assistant.REGIME_LIMITS[r][1]),
+            "regime": top["regime"],
         })
         out[market] = (sig, wf, sorted(s.removesuffix(".IS") for s in bad))
     return prices, out

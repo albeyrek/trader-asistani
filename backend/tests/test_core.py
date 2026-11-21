@@ -383,3 +383,27 @@ def test_scorecard_counts_repeated_listing_once():
     assert assistant_track.evaluate(hist2, px)["BIST"]["signals"] == 2
     act = assistant_track.active_plans(hist[:1], px, "BIST", days[4])
     assert act["AAA"]["since"] == days[2] and act["AAA"]["status"] == "open"
+
+
+def test_paper_cooldown_after_stop_skips_reentry():
+    flat = [(100, 100, 100, 100)] * 25
+    rows = flat + [(100, 101, 99, 100), (96, 96, 94, 95)] + [(100, 100, 100, 100)] * 3 + [(100, 101, 99, 100), (104, 111, 103, 110)]
+    px = _market(rows)
+    days = pd.bdate_range("2026-01-05", periods=len(rows))
+    sig = pd.concat([_signal(days[24]), _signal(days[29])], ignore_index=True)  # ikinci sinyal stoptan 3 iş günü sonra
+    assert paper.simulate(sig, px, "BIST")["trades"] == 2
+    cooled = paper.simulate(sig, px, "BIST", cooldown_days=10)
+    assert cooled["trades"] == 1 and cooled["closed"][0]["how"] == "stop"
+    assert paper.simulate(sig, px, "BIST", cooldown_days=2)["trades"] == 2  # bekleme bitmişse yeniden girilir
+
+
+def test_paper_week_cap_limits_new_positions():
+    n = 30
+    frames = [_px("XU100.IS", [(1000, 1000, 1000, 1000)] * n)]
+    sigs = []
+    for sym in ["W1", "W2", "W3"]:
+        frames.append(_px(f"{sym}.IS", [(100, 100, 100, 100)] * 25 + [(100, 101, 99, 100)] + [(100, 100.5, 99.5, 100)] * 4).assign(volume=1e8))
+        sigs.append(_signal(pd.bdate_range("2026-01-05", periods=n)[24], symbol=sym, yf=f"{sym}.IS"))
+    px, sig = pd.concat(frames, ignore_index=True), pd.concat(sigs, ignore_index=True)
+    assert paper.simulate(sig, px, "BIST", risk_pct=0.005)["open_count"] == 3
+    assert paper.simulate(sig, px, "BIST", risk_pct=0.005, week_cap=2)["open_count"] == 2
