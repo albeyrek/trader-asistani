@@ -240,7 +240,7 @@ function PortfolioCheck({ market, mk }: { market: Market; mk: AssistantMarket })
 
 const TRADE_TEXT: Record<TradeStatus, string> = {
   pending: 'bekliyor', not_filled: 'girilmedi', open: 'açık', target: 'hedef', stop: 'stop', timeout: 'süre doldu',
-  trail: 'iz süren stop (kâr)',
+  trail: 'iz süren stop (kâr)', repeat: 'süren plan (sayılmadı)',
 };
 
 function ScoreCard({ sc }: { sc: AssistantScoreMarket | undefined }) {
@@ -266,7 +266,8 @@ function ScoreCard({ sc }: { sc: AssistantScoreMarket | undefined }) {
             <Stat label="Toplam" value={r(sc.total_r)} color={sc.total_r == null ? t.muted : sc.total_r >= 0 ? t.up : t.down} />
           </View>
           <Text style={[styles.small, { color: t.muted, marginTop: 6 }]}>
-            {sc.signals} aday ({f.date(sc.first_date)} itibarıyla) · {sc.open} açık · {sc.not_filled} girilmedi. Az sayıda
+            {sc.signals} aday ({f.date(sc.first_date)} itibarıyla) · {sc.open} açık · {sc.not_filled} girilmedi
+            {sc.repeats ? ` · ${sc.repeats} tekrar (aynı plan yeniden listelendi, ayrı işlem sayılmadı)` : ''}. Az sayıda
             işlemle sonuçlar şansa bağlıdır.
           </Text>
           {sc.trades.slice(0, 10).map((x) => (

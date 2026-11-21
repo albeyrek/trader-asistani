@@ -128,21 +128,60 @@ def simulate(c: dict, bars: pd.DataFrame) -> dict:
     return res
 
 
-def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
+def _busy_until(h_date: str, res: dict) -> str:
+    """Bu öneri hangi güne kadar "aynı hissede süren plan" sayılır: açık ya da giriş bekliyorsa süresiz, kapandıysa
+    çıkış günü, girilmediyse giriş penceresinin sonu."""
+    if res["status"] in ("open", "pending"):
+        return "9999-12-31"
+    if res["status"] == "not_filled":
+        return (pd.Timestamp(h_date) + pd.offsets.BDay(ENTRY_DAYS)).date().isoformat()
+    return res["exit_date"] or h_date
+
+
+def trades_of(history: list[dict], prices: pd.DataFrame, market: str) -> list[dict]:
+    """Bir piyasanın öneri geçmişinden işlemler. Önceki planı hâlâ sürerken (açık ya da giriş bekliyor) aynı hisse
+    yeniden listelendiyse yeni işlem sayılmaz ("repeat"): aynı pozisyon birden çok kez sayılıp karne şişmesin (Kasım
+    2026'da PACS üç gün üst üste listelendi ve karnede üç ayrı stop göründü)."""
     yfs = {c["yf"] for h in history for c in h["candidates"] if c.get("yf")}
     px = prices[prices["yf_symbol"].isin(yfs)].sort_values("date")
     by = dict(tuple(px.groupby("yf_symbol")))
+    trades, busy = [], {}
+    for h in sorted((x for x in history if x["market"] == market), key=lambda x: x["date"]):
+        for c in h["candidates"]:
+            bars = by.get(c.get("yf"))
+            if bars is None:
+                continue
+            base = {"date": h["date"], "symbol": c["symbol"], "setup": c["setup"], "regime": h.get("regime"),
+                    "planned_rr": c.get("rr")}
+            prev = busy.get(c["symbol"])
+            if prev and h["date"] <= prev[0]:
+                trades.append({**base, "status": "repeat", "repeat_of": prev[1], "days": 0, "r": None, "fill": None,
+                               "exit": None, "exit_date": None})
+                continue
+            res = simulate(c, bars[bars["date"] > pd.Timestamp(h["date"])])
+            busy[c["symbol"]] = (_busy_until(h["date"], res), h["date"])
+            trades.append({**base, **res})
+    return trades
+
+
+def active_plans(history: list[dict], prices: pd.DataFrame, market: str, today: str) -> dict[str, dict]:
+    """Bugün hâlâ süren planlar: hisse -> {"since": ilk listelendiği gün, "status": "open" | "pending"} (bugünkü listede
+    aynı hisse "devam eden plan, yeniden alma" diye işaretlenir)."""
+    out = {}
+    for t in trades_of(history, prices[prices["date"] <= pd.Timestamp(today)], market):  # yalnızca bugüne kadar
+        if t["status"] in ("open", "pending") and t["date"] < today:
+            out[t["symbol"]] = {"since": t["date"], "status": t["status"], "fill": t.get("fill")}
+        elif t["status"] == "not_filled" and _busy_until(t["date"], t) >= today and t["date"] < today:
+            out[t["symbol"]] = {"since": t["date"], "status": "pending", "fill": None}
+    return out
+
+
+def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
     out: dict[str, dict] = {}
     for market in sorted({h["market"] for h in history}):
-        trades = []
-        for h in (x for x in history if x["market"] == market):
-            for c in h["candidates"]:
-                bars = by.get(c.get("yf"))
-                if bars is None:
-                    continue
-                res = simulate(c, bars[bars["date"] > pd.Timestamp(h["date"])])
-                trades.append({"date": h["date"], "symbol": c["symbol"], "setup": c["setup"],
-                               "regime": h.get("regime"), "planned_rr": c.get("rr"), **res})
+        all_trades = trades_of(history, prices, market)
+        repeats = sum(t["status"] == "repeat" for t in all_trades)
+        trades = [t for t in all_trades if t["status"] != "repeat"]
         closed = [t for t in trades if t["status"] in ("stop", "target", "timeout", "trail")]
         rs = np.array([t["r"] for t in closed], dtype=float)
         wins = sum(t["r"] > 0 for t in closed)
@@ -150,6 +189,7 @@ def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
             "snapshots": sum(1 for x in history if x["market"] == market),
             "first_date": next((x["date"] for x in history if x["market"] == market), None),
             "signals": len(trades),
+            "repeats": repeats,  # süren plan varken yeniden listelenip ayrı sayılmayan öneriler
             "filled": sum(t["status"] != "not_filled" and t["fill"] is not None for t in trades),
             "not_filled": sum(t["status"] == "not_filled" for t in trades),
             "open": sum(t["status"] == "open" for t in trades),
@@ -162,6 +202,6 @@ def evaluate(history: list[dict], prices: pd.DataFrame) -> dict:
             "avg_r": round(float(rs.mean()), 2) if len(rs) else None,
             "total_r": round(float(rs.sum()), 2) if len(rs) else None,
             "closed_rs": [round(float(x), 3) for x in rs],  # sapma alarmı için (health.drift)
-            "trades": list(reversed(trades))[:RECENT_TRADES],
+            "trades": list(reversed(all_trades))[:RECENT_TRADES],
         }
     return out

@@ -57,7 +57,13 @@ check('durum: üstünde', candidateStatus(c, q(103)) === 'above');
 check('durum: altında', candidateStatus(c, q(95)) === 'below');
 check('durum: stop', candidateStatus(c, q(91.5)) === 'stopped');
 const lm = listMessage('BIST', data.markets.BIST!);
-check('liste bildirimi', lm.title.includes('2 alım adayı') && lm.body.includes('AAA, BBB') && lm.body.includes('biraz küçült'), lm.title + ' | ' + lm.body);
+check('liste bildirimi', lm.title.includes('2 yeni alım adayı') && lm.body.includes('AAA, BBB') && lm.body.includes('küçült'), lm.title + ' | ' + lm.body);
+const withRepeat = { ...data.markets.BIST!, candidates: [cand('AAA'), { ...cand('BBB'), repeat: { since: '2026-11-02', status: 'open' as const } }] };
+const lr = listMessage('BIST', withRepeat);
+check('süren plan bildirimde ayrı', lr.title.includes('1 yeni alım adayı') && lr.body.startsWith('AAA') && lr.body.includes('süren plan (yeniden alma): BBB'),
+  lr.title + ' | ' + lr.body);
+const onlyRepeat = listMessage('BIST', { ...withRepeat, candidates: [{ ...cand('BBB'), repeat: { since: '2026-11-02', status: 'open' as const } }] });
+check('hepsi süren plansa yeni aday yok', onlyRepeat.title.includes('yeni aday yok') && onlyRepeat.body.includes('BBB'), onlyRepeat.title + ' | ' + onlyRepeat.body);
 const empty = listMessage('US', mk('2026-10-30', [], 'Ayı'));
 check('boş liste bildirimi', empty.title.includes('ABD: bugün aday yok'), empty.title);
 const om = openingMessage('BIST', [{ c, q: q(99) }, { c: cand('BBB'), q: q(104) }]);

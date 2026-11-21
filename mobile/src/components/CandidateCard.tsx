@@ -90,6 +90,9 @@ export function CandidateCard({ c, quote, riskScale }: { c: Candidate; quote?: Q
       <View style={styles.chips}>
         <Chip label={c.setup_text} fg={t.accent} bg={t.neutralBg} />
         <Chip label={`Göreli güç ${c.rs_rating}`} fg={c.rs_rating >= 80 ? t.up : t.muted} bg={c.rs_rating >= 80 ? t.upBg : t.neutralBg} />
+        {c.repeat ? (
+          <Chip label={`Süren plan · ${f.date(c.repeat.since)}’den beri · yeniden alma`} fg={t.warn} bg={t.warnBg} />
+        ) : null}
         <Chip label={ZONE_TEXT[status]} fg={zc.fg} bg={zc.bg} />
         {c.model ? (
           <Chip

@@ -367,3 +367,19 @@ def test_assistant_survives_day_with_no_candidates(tmp_path, monkeypatch):
                             fund={}, sector_info=lambda m, s: None)
     out2 = assistant.candidates(scan2, prices, overview, side2, agenda=None, health=None)
     assert out2["BIST"]["passed_filter"] == 0 and out2["BIST"]["candidates"] == []
+
+
+def test_scorecard_counts_repeated_listing_once():
+    # Aynı hisse 3 gün üst üste listelendi; ilk plan girildi ve stop oldu: tek işlem, iki tekrar
+    rows = [(100, 100, 100, 100)] * 3 + [(100, 101, 99, 100), (100, 100.5, 99.5, 100), (96, 96, 94, 95), (95, 95, 95, 95)]
+    px = _px("AAA.IS", rows, start="2026-11-02")
+    days = [d.date().isoformat() for d in pd.bdate_range("2026-11-02", periods=len(rows))]
+    plan = {**PLAN, "yf": "AAA.IS"}
+    hist = [{"market": "BIST", "date": days[i], "regime": "Ayı", "candidates": [plan]} for i in (2, 3, 4)]
+    sc = assistant_track.evaluate(hist, px)["BIST"]
+    assert sc["signals"] == 1 and sc["repeats"] == 2 and sc["closed"] == 1 and sc["stops"] == 1
+    # stoptan sonra yeniden listelenirse yeni işlem sayılır
+    hist2 = hist + [{"market": "BIST", "date": days[6], "regime": "Ayı", "candidates": [plan]}]
+    assert assistant_track.evaluate(hist2, px)["BIST"]["signals"] == 2
+    act = assistant_track.active_plans(hist[:1], px, "BIST", days[4])
+    assert act["AAA"]["since"] == days[2] and act["AAA"]["status"] == "open"

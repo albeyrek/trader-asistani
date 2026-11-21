@@ -282,6 +282,8 @@ export interface Candidate {
   model?: ModelPrediction | null;
   /** Çıkış kuralı (10 yıllık testte seçildiyse; yoksa sabit hedefli plan) */
   exit_rule?: { name: string; target: number | null; hold: number; trail?: number } | null;
+  /** Süren plan: önceki günlerden listede, planı hâlâ açık ya da giriş bekliyor (yeni alım değil, yeniden alma) */
+  repeat?: { since: string; status: 'open' | 'pending' } | null;
   exit_note?: string | null;
   atr?: number;
 }
@@ -404,7 +406,7 @@ export interface AssistantData {
   ai_model?: string | null;
 }
 
-export type TradeStatus = 'pending' | 'not_filled' | 'open' | 'target' | 'stop' | 'timeout' | 'trail';
+export type TradeStatus = 'pending' | 'not_filled' | 'open' | 'target' | 'stop' | 'timeout' | 'trail' | 'repeat';
 
 export interface AssistantTrade {
   date: string;
@@ -424,6 +426,7 @@ export interface AssistantScoreMarket {
   snapshots: number;
   first_date: string | null;
   signals: number;
+  repeats?: number; // süren plan varken yeniden listelenip ayrı sayılmayan öneriler
   filled: number;
   not_filled: number;
   open: number;

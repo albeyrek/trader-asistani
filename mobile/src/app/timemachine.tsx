@@ -13,7 +13,7 @@ const SETUP_TEXT = { breakout: 'Kırılım', pullback: 'Geri çekilme', trend: '
 const STATUS_TEXT: Record<TradeStatus, string> = {
   target: 'Hedefe ulaştı', stop: 'Stop oldu', timeout: '20 günde sonuçlanmadı', open: 'Açık', not_filled: 'Girilmedi',
   trail: 'İz süren stopla kâr',
-  pending: 'Bekliyor',
+  pending: 'Bekliyor', repeat: 'Süren plan (tekrar)',
 };
 
 /** Zaman makinesi: geçmişte bir hafta seç — asistan o gün ne derdi, sonra ne oldu? Model o tarihten sonrasını görmedi. */

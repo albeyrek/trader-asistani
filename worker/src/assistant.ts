@@ -42,6 +42,8 @@ export interface Candidate {
   commentary: string;
   /** Çıkış kuralı notu (10 yıllık testte seçilen kural; yoksa sabit hedefli plan) */
   exit_note?: string | null;
+  /** Süren plan: önceki günlerden listede ve planı hâlâ açık ya da giriş bekliyor (yeni alım değil) */
+  repeat?: { since: string; status: 'open' | 'pending' } | null;
   /** Öğrenen modelin tahmini (backend/scanner/learn.py); model henüz eğitilmediyse yok */
   model?: {
     p: number; // ilk hedefe stoptan önce ulaşma olasılığı (0-1)
@@ -243,9 +245,15 @@ export function listMessage(market: Market, mk: AssistantMarket): { title: strin
   if (!n) {
     return { title: `🤖 Asistan · ${name}: bugün aday yok`, body: `Piyasa: ${mk.regime.label}. ${mk.stance}`.slice(0, 178) };
   }
-  const syms = mk.candidates.map((c) => c.symbol).join(', ');
-  const scale = mk.risk_scale < 1 ? ` · pozisyonu ${mk.risk_scale === 0.5 ? 'yarıya' : 'biraz'} küçült` : '';
-  return { title: `🤖 Asistan · ${name}: ${n} alım adayı`, body: `${syms} · Piyasa: ${mk.regime.label}${scale}`.slice(0, 178) };
+  const fresh = mk.candidates.filter((c) => !c.repeat);
+  const cont = mk.candidates.filter((c) => c.repeat);
+  const scale = mk.risk_scale < 1 ? ` · pozisyonu ${mk.risk_scale === 0.5 ? 'yarıya' : 'küçült'}` : '';
+  const contText = cont.length ? ` · süren plan (yeniden alma): ${cont.map((c) => c.symbol).join(', ')}` : '';
+  if (!fresh.length) {
+    return { title: `🤖 Asistan · ${name}: yeni aday yok`, body: `Listedekiler süren planlar${contText.replace(' · süren plan', '')} · Piyasa: ${mk.regime.label}`.slice(0, 178) };
+  }
+  return { title: `🤖 Asistan · ${name}: ${fresh.length} yeni alım adayı`,
+    body: `${fresh.map((c) => c.symbol).join(', ')}${contText} · Piyasa: ${mk.regime.label}${scale}`.slice(0, 178) };
 }
 
 export type CandidateStatus = 'in_zone' | 'above' | 'below' | 'stopped';

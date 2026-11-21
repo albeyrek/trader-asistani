@@ -510,8 +510,24 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
 
 def build(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "views.SideData",
           generated_at: pd.Timestamp, health: dict | None = None) -> dict:
+    from . import assistant_track
     agenda = fetch_agenda()
     markets = candidates(scan, prices, overview, side, agenda, health)
+    # Süren planlar: önceki günlerin listesinde olup planı hâlâ açık ya da giriş bekleyen hisse bugün yeniden çıktıysa
+    # "devam eden plan, yeniden alma" diye işaretlenir (aynı hisseye farkında olmadan pozisyon büyütülmesin)
+    try:
+        history = assistant_track.load_history()
+        for market, v in markets.items():
+            active = assistant_track.active_plans(history, prices, market, v["date"])
+            for c in v["candidates"]:
+                a = active.get(c["symbol"])
+                if a:
+                    c["repeat"] = {"since": a["since"], "status": a["status"]}
+                    c["commentary"] = (f"Süren plan: bu hisse {a['since']} tarihinden beri listede ve planı "
+                                       f"{'açık (girildi)' if a['status'] == 'open' else 'giriş bekliyor'}; yeni alım "
+                                       "değil, yeniden almayın. " + c.get("commentary", ""))
+    except Exception as exc:  # işaretleme yapılamazsa liste yine yayınlanır
+        print(f"  ! süren planlar: {exc!r}")
     # Sürüm: bulut bekçisi yeni liste geldiğini buradan anlar (yapay zekâ yorumu ve bildirim için)
     version = "|".join(f"{m}:{v['date']}:" + ",".join(c["symbol"] for c in v["candidates"])
                        for m, v in sorted(markets.items()))

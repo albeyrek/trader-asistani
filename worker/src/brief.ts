@@ -36,7 +36,8 @@ export function morningBrief(x: BriefInput): { title: string; body: string } | n
     const n = mk.candidates.length;
     if (n) {
       const inZone = mk.candidates.filter((c) => c.close >= c.entry_low && c.close <= c.entry_high).map((c) => c.symbol);
-      parts.push(`Liste: ${mk.candidates.map((c) => c.symbol).join(', ')}`
+      const cont = mk.candidates.filter((c) => c.repeat).map((c) => c.symbol);
+      parts.push(`Liste: ${mk.candidates.map((c) => c.symbol).join(', ')}${cont.length ? ` (süren plan, yeniden alma: ${cont.join(', ')})` : ''}`
         + (inZone.length ? ` (giriş bölgesinde: ${inZone.join(', ')})` : ' (hiçbiri giriş bölgesinde değil, bekle)'));
     } else {
       parts.push('Bugün aday yok');
