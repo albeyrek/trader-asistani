@@ -407,3 +407,36 @@ def test_paper_week_cap_limits_new_positions():
     px, sig = pd.concat(frames, ignore_index=True), pd.concat(sigs, ignore_index=True)
     assert paper.simulate(sig, px, "BIST", risk_pct=0.005)["open_count"] == 3
     assert paper.simulate(sig, px, "BIST", risk_pct=0.005, week_cap=2)["open_count"] == 2
+
+
+def test_kaplab_event_flags_use_only_known_events():
+    from scanner import kaplab
+    ev = pd.DataFrame({
+        "symbol": ["AAA", "AAA", "AAA"], "event": ["devre_kesici", "temettu", "devre_kesici"],
+        "published": pd.to_datetime(["2024-03-04 10:00", "2024-02-20 09:00", "2024-03-20 19:30"]),
+    })
+    g = pd.DataFrame({"symbol": ["AAA", "AAA", "AAA"], "yf_symbol": ["AAA.IS"] * 3,
+                      "date": pd.to_datetime(["2024-03-06", "2024-03-19", "2024-03-20"]), "quality": [50.0, 50.0, 50.0]})
+    proven = {2024: {"devre_kesici": -1, "temettu": 1}}
+    neg, pos = kaplab.event_flags(g, ev, proven)
+    assert list(neg) == [True, False, False]   # 3/20 akşamki devre kesici o gün (18:00 sonrası) bilinmiyor
+    assert list(pos) == [True, True, False]    # temettü 20 iş günü içinde (3/20'de pencere dışında)
+    assert not kaplab.event_flags(g, ev, {2024: {}})[0].any()  # kanıtlanmamış olay sayılmaz
+    counts: dict = {}
+    out = kaplab.make_adjust("kap_ikisi", ev, proven, counts)(g, "BIST")
+    assert len(out) == 2 and out["quality"].iloc[0] == 50.0 + kaplab.BOOST and counts["kap_ikisi"]["negative"] == 1
+
+
+def test_kaplab_proven_by_year_does_not_look_ahead():
+    from scanner import kaplab
+    rng = np.random.default_rng(0)
+    rows = []
+    for y in (2019, 2020, 2021):
+        for i in range(120):
+            x = 2.0 + rng.normal(0, 3)
+            rows.append({"event": "temettu", "date": pd.Timestamp(f"{y}-03-01") + pd.Timedelta(days=i),
+                         "gap": 0.0, "ex_1g": x / 10, "ex_5g": x / 3, "ex_20g": x})
+    m = pd.DataFrame(rows)
+    p = kaplab.proven_by_year(m, [2019, 2020, 2021, 2022])
+    assert p[2019] == {} and p[2020] == {}       # 2020 için yalnızca 1 yıllık geçmiş var
+    assert p[2022] == {"temettu": 1}               # 2019-2021 ile kanıtlandı, olumlu

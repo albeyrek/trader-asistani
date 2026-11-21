@@ -409,9 +409,12 @@ def regime_labels(g: pd.DataFrame, prices: pd.DataFrame, market: str) -> pd.Seri
     return pd.Series([next(lab for th, lab, _ in REGIMES if s >= th) for s in score], index=g.index)
 
 
-def backtest_signals(top_k: int | None = None) -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict, list[str]]]]:
-    """top_k: haftalık aday sayısı (yoksa piyasanın düzeni: portfolio_settings)."""
-    """Test portföyünün girdileri: (fiyatlar, piyasa -> (sinyaller, yıl yıl çıkış kuralı, çıkarılan hisseler))."""
+def backtest_signals(top_k: int | None = None, adjust=None,
+                     ) -> tuple[pd.DataFrame, dict[str, tuple[pd.DataFrame, dict, list[str]]]]:
+    """Test portföyünün girdileri: (fiyatlar, piyasa -> (sinyaller, yıl yıl çıkış kuralı, çıkarılan hisseler)).
+    top_k: haftalık aday sayısı (yoksa piyasanın düzeni: portfolio_settings).
+    adjust: isteğe bağlı fonksiyon (aday tablosu, piyasa) -> aday tablosu; sıralamadan önce uygulanır, satır silebilir ya
+    da "quality"yi değiştirebilir (araştırmalar için, ör. kaplab: KAP olaylarına göre eleme ve öne alma)."""
     from . import assistant, exits, history as hist, learn
     samples = pd.read_parquet(learn.SAMPLES_FILE)
     samples = samples[learn.live_like(samples) & (samples["date"] >= BACKTEST_START)].copy()
@@ -425,6 +428,8 @@ def backtest_signals(top_k: int | None = None) -> tuple[pd.DataFrame, dict[str, 
         g["regime"] = regime_labels(g, prices, market)
         weak = g["regime"].isin(["Zayıf", "Ayı"]) & (market in assistant.BEAR_MIN_RS_MARKETS)
         g = g[g["rs_rating"] >= np.where(weak, assistant.BEAR_MIN_RS, assistant.MIN_RS)]
+        if adjust is not None:
+            g = adjust(g, market)
         ranked = g.sort_values("quality", ascending=False)
         rank = ranked.groupby("date").cumcount()
         limit = ranked["regime"].map(lambda r: assistant.REGIME_LIMITS[r][0])
