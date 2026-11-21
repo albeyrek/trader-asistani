@@ -40,6 +40,7 @@ BEAR_MIN_RS = 85          # zayıf/ayı piyasada sadece en güçlüler...
 # (liste+çarpan+RS85: yıllık %41,5, düşüş %29,4 -> liste+çarpan: %45,5, düşüş %28,2; ABD'de filtre zararsız)
 BEAR_MIN_RS_MARKETS = {"US"}
 MIN_EXP_R = 0.05          # öğrenen model güvenilirse: beklenen getirisi bundan düşük aday listeye girmez
+RANK_MIN_SHARE = 0.8      # şampiyon model adayların en az bu kadarını puanlayabiliyorsa sıralar
 FORM_WEEKS_TEXT = "8 haftada"
 
 # Gündem (bulut bekçisi): politik risk "Yüksek" ise BIST'te önerilen pozisyon yarıya iner; liste kısaltılmaz.
@@ -449,12 +450,19 @@ def candidates(scan: pd.DataFrame, prices: pd.DataFrame, overview: dict, side: "
         min_rs = BEAR_MIN_RS if regime["label"] in ("Zayıf", "Ayı") and market in BEAR_MIN_RS_MARKETS else MIN_RS
         rejected = 0
         champion = scorer.champion_name(market)
-        by_champion = bool(champion and rows and all(c["model"] and c["model"].get("rank") is not None for c in rows))
+        n_ranked = sum(1 for c in rows if (c.get("model") or {}).get("rank") is not None)
+        # Şampiyon, adayların çoğunu puanlayabiliyorsa sıralar (haftalık verisi yetersiz birkaç hisse yüzünden bütün
+        # sıralamayı kurallara bırakmak yanlıştı: 20 Kasım'da şampiyonun ortalamanın altında gördüğü hisseler listeye
+        # girdi). Puanı olmayanlar sona kalır.
+        by_champion = bool(champion and rows and n_ranked >= RANK_MIN_SHARE * len(rows))
         if by_champion:
             # Sıralama yetkisi yalnızca model yarışının şampiyonunda (piyasaya özel, çıkış kuralının R'siyle sıkı testi
             # geçti: t >= 2,5, yılların çoğunda iyi, tek yıla dayanmıyor). Ortak eski model (learn.train) daha gevşek
             # testini geçse bile sıralamaz ve aday elemez; yalnızca kazanma olasılığını gösterir.
-            rows.sort(key=lambda c: -c["model"]["rank"])
+            def champ_key(c: dict) -> tuple:
+                r = (c.get("model") or {}).get("rank")
+                return (r is None, -(r if r is not None else 0.0), -c["quality"])
+            rows.sort(key=champ_key)
             eligible = [c for c in rows if c["rs_rating"] >= min_rs]
         else:
             rows.sort(key=lambda c: -c["quality"])
