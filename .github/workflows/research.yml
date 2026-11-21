@@ -10,7 +10,7 @@ on:
         required: true
         default: drawdown
         type: choice
-        options: [drawdown, diversify, exitlab, entrylab, research]
+        options: [drawdown, diversify, exitlab, entrylab, kap_events, research]
 
 permissions:
   contents: read
@@ -59,6 +59,8 @@ jobs:
             backend/data/model/diversify_test.json
             backend/data/model/exitlab_test.json
             backend/data/model/entrylab_test.json
+            backend/data/kap_events.json
+            backend/data/kap_events.txt
             backend/data/model/research.json
             backend/data/exits_report.txt
           if-no-files-found: ignore
