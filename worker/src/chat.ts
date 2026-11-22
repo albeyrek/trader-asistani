@@ -226,6 +226,80 @@ export function plansContext(plans: ChatPlan[]): string {
     })].join('\n');
 }
 
+// ------------------------------------------------------------------ sorgu planı (yapay zekâ hangi veriye bakılacağını seçer)
+// Kelime eşleştirme ("thyao", "gündem") yalnızca son soruya bakar ve yazılışa bağlıdır. Plan adımında yapay zekâ
+// konuşmanın tamamını okuyup hangi hisselerin ve konuların verisine bakılacağını JSON olarak söyler: "peki ya
+// riskleri?" gibi devam sorularında önceki hisse, "Türk Hava Yolları" / "Koç Holding" gibi adlarda borsa kodu bulunur.
+// Plan kelime eşleştirmesinin yerine geçmez, üstüne eklenir; plan alınamazsa eski yol aynen çalışır.
+
+export interface QueryPlan {
+  symbols: string[];
+  topics: string[];
+  market?: 'BIST' | 'US';
+}
+
+const PLAN_TIMEOUT_MS = 8000;
+const PLAN_SYSTEM = [
+  'Bir borsa uygulamasında kullanıcının SON sorusunu cevaplamak için hangi verilere bakılacağını seç.',
+  'Önceki mesajlar yalnızca bağlam içindir (ör. "peki riskleri?" önceki mesajdaki hisseyi sorar).',
+  'YALNIZCA şu biçimde tek satır JSON döndür, başka hiçbir şey yazma:',
+  '{"symbols": ["THYAO"], "topics": ["market"], "market": "BIST"}',
+  'symbols: sorunun ilgilendiği hisselerin borsa kodları (Borsa İstanbul kodu ya da ABD kodu), en çok 4; şirket adı',
+  'yazıldıysa kodunu yaz (Türk Hava Yolları -> THYAO, Apple -> AAPL). Hisse yoksa boş liste.',
+  'topics (gerekenler, yoksa boş liste): portfolio (kullanıcının kendi portföyü), plans (takipteki alış planları, ne zaman',
+  'satmalı), candidates (bugünkü asistan listesi, ne alınır), market (piyasa genel durumu, endeks, sektörler),',
+  'agenda (gündem, haber, faiz, enflasyon, siyaset), performance (sanal portföy ve test sonuçları),',
+  'strategy (asistanın stratejisi ve kuralları).',
+  'market: soru ABD hisseleri ya da ABD piyasası hakkındaysa "US", değilse "BIST".',
+].join(' ');
+
+/** Yapay zekânın plan cevabını doğrular (geçersiz kod, konu ve fazlalıklar atılır). */
+export function parsePlan(raw: string): QueryPlan | null {
+  const m = raw.replace(/<think>[\s\S]*?<\/think>/g, '').match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  let j: Json;
+  try {
+    j = JSON.parse(m[0]) as Json;
+  } catch {
+    return null;
+  }
+  const symbols = (Array.isArray(j.symbols) ? (j.symbols as unknown[]) : [])
+    .filter((x): x is string => typeof x === 'string')
+    .map((x) => x.trim().replace(/\.IS$/i, '').toLocaleUpperCase('tr-TR').replace(/İ/g, 'I'))
+    .filter((x) => /^[A-Z0-9.]{1,7}$/.test(x));
+  const topics = (Array.isArray(j.topics) ? (j.topics as unknown[]) : [])
+    .filter((x): x is string => typeof x === 'string' && x in INTENTS);
+  const market = j.market === 'US' || j.market === 'BIST' ? j.market : undefined;
+  return { symbols: [...new Set(symbols)].slice(0, 6), topics: [...new Set(topics)], market };
+}
+
+/** Plandaki kodlardan uygulamanın tanıdıkları (aynı kod iki piyasada varsa planın piyasası). */
+export function resolvePlanSymbols(plan: QueryPlan, bist: Set<string>, us: Set<string>): { symbol: string; market: 'BIST' | 'US' }[] {
+  const out: { symbol: string; market: 'BIST' | 'US' }[] = [];
+  for (const s of plan.symbols) {
+    const inB = bist.has(s);
+    const inU = us.has(s) && !COMMON.has(s);
+    if (inB && (!inU || plan.market !== 'US')) out.push({ symbol: s, market: 'BIST' });
+    else if (inU) out.push({ symbol: s, market: 'US' });
+  }
+  return out;
+}
+
+export async function planQuery(ai: Ai, req: ChatRequest, model = CHAT_MODEL): Promise<QueryPlan | null> {
+  const convo = req.messages.slice(-6).map((m) => `${m.role === 'user' ? 'Kullanıcı' : 'Asistan'}: ${m.content.slice(0, 600)}`).join('\n');
+  const extra = req.symbol ? `\n(Soru ${req.symbol} hisse sayfasından soruldu.)` : '';
+  const run = ai.run(model as Parameters<Ai['run']>[0], {
+    messages: [{ role: 'system', content: PLAN_SYSTEM }, { role: 'user', content: `${convo}${extra}` }],
+    max_tokens: 120, temperature: 0, ...MODEL_OPTIONS[model],
+  } as never) as Promise<AiResult>;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), PLAN_TIMEOUT_MS); });
+  const res = await Promise.race([run, timeout]).finally(() => { if (timer !== null) clearTimeout(timer); });
+  if (!res) return null;
+  const raw = typeof res.response === 'string' ? res.response : res.choices?.[0]?.message?.content;
+  return typeof raw === 'string' ? parsePlan(raw) : null;
+}
+
 // ------------------------------------------------------------------ istem
 
 const SYSTEM = [
@@ -239,22 +313,23 @@ const SYSTEM = [
   '(ör. ABD stratejisinin endeksin gerisinde kaldığı).',
 ].join(' ');
 
-export async function buildContext(req: ChatRequest, dataUrl: string, agenda: Json | null):
+export async function buildContext(req: ChatRequest, dataUrl: string, agenda: Json | null, plan?: QueryPlan | null):
   Promise<{ context: string; sources: ChatSource[] }> {
   const question = req.messages.filter((m) => m.role === 'user').slice(-1)[0]?.content ?? '';
   const meta = await getJson(`${dataUrl}/watch_meta.json`);
   const bist = new Set<string>(meta?.bist ?? []);
   const us = new Set<string>(Object.keys(meta?.yf ?? {}));
   const found = detectSymbols(question, bist, us, meta?.names ?? {});
+  if (plan) for (const p of resolvePlanSymbols(plan, bist, us)) if (!found.some((f) => f.symbol === p.symbol)) found.push(p);
   if (req.symbol && req.market && !found.some((f) => f.symbol === req.symbol)) found.unshift({ symbol: req.symbol, market: req.market });
-  const intents = detectIntents(question);
-  const market: 'BIST' | 'US' = found[0]?.market ?? req.market ?? (/\b(abd|amerika|s&p|nasdaq)\b/.test(trLower(question)) ? 'US' : 'BIST');
+  const intents = [...new Set([...detectIntents(question), ...(plan?.topics ?? [])])];
+  const market: 'BIST' | 'US' = found[0]?.market ?? req.market ?? plan?.market ?? (/\b(abd|amerika|s&p|nasdaq)\b/.test(trLower(question)) ? 'US' : 'BIST');
   const sources: ChatSource[] = [];
   const parts: string[] = [];
 
   const asst = await getJson(`${dataUrl}/assistant.json`);
   const stocks = new Map<string, Json>();
-  for (const f of found.slice(0, 3)) {
+  for (const f of found.slice(0, 4)) {
     const s = await getJson(`${dataUrl}/stock/${f.market}/${encodeURIComponent(f.symbol)}.json`);
     if (!s) continue;
     stocks.set(`${f.market}:${f.symbol}`, s);
@@ -395,18 +470,21 @@ export function verifyNumbers(answerText: string, ref: number[]): { checked: num
   return { checked, unverified };
 }
 
+/** Sohbet modeli (asistan yorumlarından ayrı seçilir: sohbette akıl yürütme ve Türkçe kalitesi daha önemli). */
+export const CHAT_MODEL: string = AI_MODEL;
+
 type AiResult = { response?: unknown; choices?: { message?: { content?: unknown } }[] };
 
 /** strict: önceki denemede bağlamda bulunmayan sayılar (ikinci denemede yapay zekâya hatırlatılır). */
-export async function answer(ai: Ai, req: ChatRequest, context: string, strict?: string[]): Promise<string | null> {
+export async function answer(ai: Ai, req: ChatRequest, context: string, strict?: string[], model = CHAT_MODEL): Promise<string | null> {
   const messages = chatPrompt(req, context);
   if (strict?.length) {
     messages[0] = { role: 'system', content: `${messages[0].content}\n\nUYARI: Önceki cevabında bağlamda olmayan şu sayılar vardı: `
       + `${strict.slice(0, 8).join(', ')}. Bu kez YALNIZCA bağlamda yazan rakamları aynen kullan; kendin hesaplama, `
       + 'tahmin ya da yuvarlama yapma. Gerekli rakam bağlamda yoksa rakamsız anlat.' };
   }
-  const res = (await ai.run(AI_MODEL as Parameters<Ai['run']>[0], {
-    messages, max_tokens: 700, temperature: strict?.length ? 0.1 : 0.3, ...MODEL_OPTIONS[AI_MODEL],
+  const res = (await ai.run(model as Parameters<Ai['run']>[0], {
+    messages, max_tokens: 700, temperature: strict?.length ? 0.1 : 0.3, ...MODEL_OPTIONS[model],
   } as never)) as AiResult;
   const raw = typeof res.response === 'string' ? res.response : res.choices?.[0]?.message?.content;
   return typeof raw === 'string' && raw.trim() ? cleanAnswer(raw) : null;

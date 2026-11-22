@@ -25,7 +25,7 @@ import {
   aiSummary, calendar, FALLBACK_FEEDS, FEED_MIN_HISTORY_H, fetchFallback, fetchTopic, headlineRate, POLITICAL_KEEP_MS, politicalRisk, riskMessage, summarize, TOPICS,
   type AgendaItem, type AiTheme, type PoliticalRisk,
 } from './agenda';
-import { answer, buildContext, referenceNumbers, verifyNumbers, type ChatRequest } from './chat';
+import { answer, buildContext, planQuery, referenceNumbers, verifyNumbers, type ChatRequest } from './chat';
 import { healthAlert, trDay, type Health } from './health';
 import { dailyMessage, intradayEvent, intradayMessage, parsePlans, planStatus, type Bar, type PlanStatus, type TrackedPlan } from './plans';
 import { briefTime, morningBrief } from './brief';
@@ -764,7 +764,9 @@ async function chatEndpoint(req: Request, env: Env): Promise<Response> {
   }
   const agendaState = await env.KV.get<AgendaState>('agenda', 'json');
   const agenda = agendaState ? (agendaResponse(agendaState) as Record<string, unknown>) : null;
-  const { context, sources } = await buildContext(request, env.DATA_URL, agenda);
+  // Önce yapay zekâ hangi veriye bakılacağını seçer (alınamazsa kelime eşleştirmesiyle devam edilir)
+  const plan = await planQuery(env.AI, request).catch(() => null);
+  const { context, sources } = await buildContext(request, env.DATA_URL, agenda, plan);
   let text: string | null = null;
   try {
     text = await answer(env.AI, request, context);

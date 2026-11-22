@@ -1,5 +1,5 @@
 // Sohbet: hisse ve konu tespiti testi — npx tsx test/chat.ts
-import { detectIntents, detectSymbols, plansContext, referenceNumbers, verifyNumbers } from '../src/chat';
+import { detectIntents, detectSymbols, parsePlan, plansContext, referenceNumbers, resolvePlanSymbols, verifyNumbers } from '../src/chat';
 
 let fail = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -53,6 +53,16 @@ const pc = plansContext([{ symbol: 'THYAO', market: 'BIST', opened: '2026-11-03'
 check('plan bağlamı', pc.includes('THYAO (BIST): 2026-11-03 alış 300,00') && pc.includes('güncel stop 304,50') && pc.includes('+1,22R'), pc);
 const pref = referenceNumbers(pc);
 check('plan rakamları doğrulanır', verifyNumbers('THYAO için güncel iz süren stop 304,50; son kapanış 318,25 ve +1,22R kârdasın.', pref).unverified.length === 0);
+
+// Sorgu planı: yapay zekânın JSON'u doğrulanır, bilinmeyen kod ve konu atılır
+const pl = parsePlan('Tamam: {"symbols": ["thyao", "Aselsan", "ASELS", "KCHOL.IS"], "topics": ["market", "uydurma"], "market": "BIST"}');
+check('plan JSON okunur', ['THYAO', 'ASELS', 'KCHOL'].every((x) => pl?.symbols.includes(x)) && pl?.topics.join(',') === 'market' && pl?.market === 'BIST',
+  JSON.stringify(pl));
+check('bozuk plan yok sayılır', parsePlan('bilmiyorum') === null && parsePlan('{symbols: [THYAO]}') === null);
+check('düşünme bloğu atlanır', parsePlan('<think>{"x":1} belki</think>{"symbols":["GARAN"],"topics":[]}')?.symbols[0] === 'GARAN');
+const rs = (p: Parameters<typeof resolvePlanSymbols>[0]) => resolvePlanSymbols(p, bist, us).map((x) => `${x.market}:${x.symbol}`).join(',');
+check('plan kodları çözülür', rs({ symbols: ['THYAO', 'NVDA', 'XYZW'], topics: [] }) === 'BIST:THYAO,US:NVDA', rs({ symbols: ['THYAO', 'NVDA', 'XYZW'], topics: [] }));
+check('sıradan kelime plan kodu değil', rs({ symbols: ['ON', 'IT'], topics: [], market: 'US' }) === '');
 
 console.log(fail ? `\n${fail} test başarısız` : '\nTüm testler geçti');
 process.exit(fail ? 1 : 0);
