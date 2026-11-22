@@ -85,7 +85,7 @@ export default function ChatScreen() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={90}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}>
       <Stack.Screen options={{
         title: symbol ? `Asistana sor · ${symbol}` : 'Asistana sor',
         headerRight: () => (msgs.length ? (
@@ -109,7 +109,7 @@ export default function ChatScreen() {
         {busy ? (
           <View style={[styles.bubble, styles.left, { backgroundColor: t.card, borderColor: t.border, flexDirection: 'row', gap: 8 }]}>
             <ActivityIndicator size="small" color={t.accent} />
-            <Text style={{ color: t.muted }}>Asistan verilere bakıyor…</Text>
+            <Text style={{ color: t.muted, flexShrink: 1 }}>Asistan verilere bakıyor…</Text>
           </View>
         ) : null}
         {!busy ? (
@@ -148,7 +148,7 @@ function Bubble({ m, t, onRate }: { m: ChatMessage; t: Theme; onRate: (r: 1 | -1
   return (
     <View style={[styles.bubble, mine ? styles.right : styles.left,
       mine ? { backgroundColor: t.accent } : { backgroundColor: t.card, borderColor: m.error ? t.down : t.border }]}>
-      {mine ? <Text style={{ color: '#FFFFFF', fontSize: 14, lineHeight: 20 }}>{m.content}</Text> : <Rich text={m.content} t={t} error={m.error} />}
+      {mine ? <Text style={[styles.body, { color: '#FFFFFF' }]}>{m.content}</Text> : <Rich text={m.content} t={t} error={m.error} />}
       {m.sources?.length ? (
         <View style={styles.sources}>
           <Text style={[styles.tiny, { color: t.muted }]}>Kullanılan veriler:</Text>
@@ -163,7 +163,7 @@ function Bubble({ m, t, onRate }: { m: ChatMessage; t: Theme; onRate: (r: 1 | -1
       {showCheck ? (
         <View style={styles.check}>
           <Ionicons name={m.verified ? 'checkmark-circle' : 'alert-circle'} size={14} color={m.verified ? t.up : t.warn} />
-          <Text style={[styles.tiny, { color: m.verified ? t.muted : t.warn, flex: 1 }]}>
+          <Text style={[styles.tiny, { color: m.verified ? t.muted : t.warn, flexShrink: 1 }]}>
             {m.verified
               ? `Cevaptaki ${m.checked} rakam uygulamanın verisiyle doğrulandı`
               : `Doğrulanamayan rakam: ${m.unverified?.join(', ')} — uygulamanın verisinde yok (yapay zekânın hesabı ya da hatası olabilir)`}
@@ -208,8 +208,8 @@ function Rich({ text, t, error }: { text: string; t: Theme; error?: boolean }) {
         const parts = body.split('**');
         return (
           <View key={i} style={{ flexDirection: 'row', paddingLeft: bullet ? 4 : 0 }}>
-            {bullet ? <Text style={{ color: t.text, fontSize: 14, lineHeight: 20 }}>•  </Text> : null}
-            <Text style={{ color: error ? t.down : t.text, fontSize: 14, lineHeight: 20, flex: 1 }}>
+            {bullet ? <Text style={[styles.body, { color: t.text, marginRight: 6 }]}>•</Text> : null}
+            <Text style={[styles.body, { color: error ? t.down : t.text, flexShrink: 1 }]}>
               {parts.map((p, j) => <Text key={j} style={j % 2 ? { fontWeight: '700' } : undefined}>{p}</Text>)}
             </Text>
           </View>
@@ -222,17 +222,20 @@ function Rich({ text, t, error }: { text: string; t: Theme; error?: boolean }) {
 const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 24, gap: 10 },
   intro: { borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, padding: 14, flexDirection: 'row', gap: 12, alignItems: 'center' },
-  introText: { flex: 1, fontSize: 13, lineHeight: 19 },
+  introText: { flex: 1, fontSize: 13 },
   bubble: { maxWidth: '88%', borderRadius: 14, padding: 12, borderWidth: StyleSheet.hairlineWidth },
-  left: { alignSelf: 'flex-start' },
+  // Asistan balonu tam genişlikte: Android'de genişliği belli olmayan balonda yazı yanlış ölçülüp üst üste biniyordu
+  left: { alignSelf: 'stretch' },
   right: { alignSelf: 'flex-end', borderWidth: 0 },
   sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8, alignItems: 'center' },
   source: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+  // Satır yüksekliği sabitlenmez: büyük yazı tipi ayarlı telefonlarda sabit lineHeight satırları üst üste bindiriyordu
+  body: { fontSize: 14 },
   tiny: { fontSize: 11 },
   check: { flexDirection: 'row', gap: 6, alignItems: 'flex-start', marginTop: 8 },
   rateRow: { flexDirection: 'row', gap: 14, alignItems: 'center', marginTop: 8 },
   suggestions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  suggestion: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  suggestion: { maxWidth: '100%', borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, padding: 10, borderTopWidth: StyleSheet.hairlineWidth },
   input: { flex: 1, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14, maxHeight: 120 },
   send: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
